@@ -115,6 +115,72 @@ Resources:
               Action: sns:Publish
               Resource: !Ref AirAlertsTopic
 
+  # Phase 5: 30-minute schedule (PRD F2)
+  FetchScheduleRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub cleanair-fetch-30min-${Stage}
+      ScheduleExpression: rate(30 minutes)
+      State: ENABLED
+      Targets:
+        - Id: FetchAndEvaluateTarget
+          Arn: !GetAtt FetchAndEvaluateFunction.Arn
+
+  FetchScheduleLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref FetchAndEvaluateFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt FetchScheduleRule.Arn
+
+  # Phase 5: HTTP API for the dashboard
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: !Ref Stage
+      CorsConfiguration:
+        AllowOrigins: ['*'] # tightened to the Amplify domain in Phase 7
+        AllowMethods: [GET, POST, OPTIONS]
+        AllowHeaders: [Content-Type]
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 20
+        ThrottlingRateLimit: 10
+
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/functions/api/
+      FunctionName: !Sub cleanair-api-${Stage}
+      Handler: index.handler
+      Environment:
+        Variables:
+          SCHOOLS_TABLE: !Ref SchoolsTable
+          READINGS_TABLE: !Ref ReadingsTable
+          ADVISORY_TABLE: !Ref AdvisoryCacheTable
+          ALERTS_TABLE: !Ref AlertsTable
+          ALERT_TOPIC_ARN: !Ref AirAlertsTopic
+          OPENAQ_API_KEY: !Ref OpenAQApiKey
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /{proxy+}
+            Method: ANY
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref SchoolsTable }
+        - DynamoDBCrudPolicy: { TableName: !Ref ReadingsTable }
+        - DynamoDBCrudPolicy: { TableName: !Ref AdvisoryCacheTable }
+        - DynamoDBCrudPolicy: { TableName: !Ref AlertsTable }
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action: sns:Publish
+              Resource: !Ref AirAlertsTopic
+
 Outputs:
   FetchAndEvaluateArn:
     Value: !GetAtt FetchAndEvaluateFunction.Arn
+  ApiBaseUrl:
+    Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/${Stage}
