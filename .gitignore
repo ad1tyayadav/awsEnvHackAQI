@@ -1,0 +1,6 @@
+.env*
+node_modules
+.aws-sam
+.next
+out
+cc.bat

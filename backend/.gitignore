@@ -1,0 +1,7 @@
+node_modules/
+.aws-sam/
+.env*
+dist/
+out/
+__tests__/
+*.log

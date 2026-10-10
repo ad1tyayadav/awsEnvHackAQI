@@ -1,0 +1,104 @@
+# Clean Air Day-Planner for Schools - SAM template
+# Creates: 4 DynamoDB tables, fetchAndEvaluate Lambda, (later phases add SNS, EventBridge, API GW)
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Clean Air Day-Planner for Schools (AWS Bharat Build, Track 01 Air)
+
+Parameters:
+  OpenAQApiKey:
+    Type: String
+    NoEcho: true
+    Description: OpenAQ v3 API key
+  Stage:
+    Type: String
+    Default: prod
+
+Globals:
+  Function:
+    Runtime: nodejs20.x
+    Timeout: 60
+    MemorySize: 256
+    Handler: index.handler
+    Architectures: [x86_64]
+    Environment:
+      Variables:
+        STAGE: !Ref Stage
+
+Resources:
+  # DynamoDB tables (PRD section 8)
+  SchoolsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub cleanair-schools-${Stage}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: schoolId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: schoolId
+          KeyType: HASH
+
+  ReadingsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub cleanair-readings-${Stage}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: schoolId
+          AttributeType: S
+        - AttributeName: ts
+          AttributeType: S
+      KeySchema:
+        - AttributeName: schoolId
+          KeyType: HASH
+        - AttributeName: ts
+          KeyType: RANGE
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
+  AdvisoryCacheTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub cleanair-advisory-cache-${Stage}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: key
+          AttributeType: S
+      KeySchema:
+        - AttributeName: key
+          KeyType: HASH
+
+  AlertsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub cleanair-alerts-${Stage}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: schoolId
+          AttributeType: S
+        - AttributeName: ts
+          AttributeType: S
+      KeySchema:
+        - AttributeName: schoolId
+          KeyType: HASH
+        - AttributeName: ts
+          KeyType: RANGE
+
+  # Placeholder Lambda (Phase 2+ fills in real logic)
+  FetchAndEvaluateFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/functions/fetchAndEvaluate/
+      FunctionName: !Sub cleanair-fetch-evaluate-${Stage}
+      Environment:
+        Variables:
+          SCHOOLS_TABLE: !Ref SchoolsTable
+          READINGS_TABLE: !Ref ReadingsTable
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref SchoolsTable }
+        - DynamoDBCrudPolicy: { TableName: !Ref ReadingsTable }
+
+Outputs:
+  FetchAndEvaluateArn:
+    Value: !GetAtt FetchAndEvaluateFunction.Arn
