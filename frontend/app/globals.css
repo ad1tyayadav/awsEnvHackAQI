@@ -1,0 +1,8 @@
+@import "tailwindcss";
+
+:root {
+  --tier-green: #16a34a;
+  --tier-yellow: #ca8a04;
+  --tier-orange: #ea580c;
+  --tier-red: #dc2626;
+}
