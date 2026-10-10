@@ -5,6 +5,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import nodemailer, { type Transporter } from 'nodemailer';
 
 import { fetchNearestPM25 } from '../../lib/openaq.js';
 import { pm25ToAqi } from '../../lib/aqi.js';
@@ -36,6 +37,41 @@ function loadApiKey(): string {
   return '';
 }
 const OPENAQ_KEY = loadApiKey();
+
+/** Gmail SMTP creds (for REAL alert emails) from env or .env: gmail_user / gmail_app_pass. */
+function loadGmail(): { user: string; pass: string } | null {
+  if (process.env.GMAIL_USER && process.env.GMAIL_APP_PASS) return { user: process.env.GMAIL_USER, pass: process.env.GMAIL_APP_PASS };
+  try {
+    const txt = fs.readFileSync(path.join(REPO_ROOT, '.env'), 'utf8');
+    let user = '', pass = '';
+    for (const l of txt.split(/\r?\n/)) {
+      const m = l.match(/^\s*(gmail[_-]?user|gmail[_-]?app[_-]?pass)\s*=\s*(.+)\s*$/i);
+      if (!m) continue;
+      const k = m[1]!.toLowerCase().replace(/-/g, '_');
+      if (k === 'gmail_user') user = m[2]!.trim();
+      if (k === 'gmail_app_pass') pass = m[2]!.replace(/\s+/g, '');
+    }
+    return user && pass ? { user, pass } : null;
+  } catch { return null; }
+}
+const GMAIL = loadGmail();
+let mailer: Transporter | null = GMAIL
+  ? nodemailer.createTransport({
+      host: 'smtp.gmail.com', port: 465, secure: true,
+      auth: { user: GMAIL.user, pass: GMAIL.pass },
+    })
+  : null;
+async function sendRealEmail(to: string, subject: string, body: string): Promise<boolean> {
+  if (!mailer) return false;
+  try {
+    const info = await mailer.sendMail({ from: `"Clean Air Day-Planner" <${GMAIL!.user}>`, to, subject, text: body });
+    console.log(`[localdev] REAL EMAIL SENT to ${to} (id ${info.messageId})`);
+    return true;
+  } catch (err) {
+    console.error(`[localdev] EMAIL FAILED: ${(err as Error).message}`);
+    return false;
+  }
+}
 
 interface SchoolRow {
   schoolId: string; name: string; city: string; lat: number; lng: number;
@@ -87,20 +123,28 @@ function formatAlertEmail(name: string, tier: string, aqi: number): { subject: s
   ].join('\n');
   return { subject, body };
 }
-function evaluateAndMaybeAlert(s: Store, school: SchoolRow, pm25: number, source: 'openaq' | 'simulated', stationName: string | undefined, ts: string): string | null {
+function evaluateAndMaybeAlert(s: Store, school: SchoolRow, pm25: number, source: 'openaq' | 'simulated', stationName: string | undefined, ts: string): Promise<string | null> {
   const { aqi, category } = pm25ToAqi(pm25);
   const tier = aqiToTier(aqi);
   const reading: ReadingRow = { schoolId: school.schoolId, ts, pm25, aqi, category, tier, source, stationName };
   (s.readings[school.schoolId] ??= []).unshift(reading);
   let alertSubject: string | null = null;
+  let emailPromise: Promise<unknown> = Promise.resolve();
   if (shouldAlert((school.lastAlertTier ?? null) as never, tier)) {
     const { subject, body } = formatAlertEmail(school.name, tier, aqi);
     s.alertLog.push({ ts, schoolId: school.schoolId, subject, body });
-    console.log(`\n=== ALERT (locally logged, would be SNS email) ===\nTo: ${(school.contactEmails ?? []).join(', ')}\nSubject: ${subject}\n${body}\n===\n`);
+    console.log(`\n=== ALERT ===\nTo: ${(school.contactEmails ?? []).join(', ')}\nSubject: ${subject}\n${body}\n===\n`);
+    const emailTargets = school.contactEmails ?? [];
     alertSubject = subject;
+    emailPromise = Promise.all(emailTargets.map((to) => sendRealEmail(to, subject, body)))
+      .then((results) => {
+        if (results.every((r) => r === false) && emailTargets.length > 0) {
+          console.log('[localdev] (No SMTP configured - set gmail_user / gmail_app_pass in .env to actually SEND. Alert only logged above.)');
+        }
+      });
   }
   school.lastAlertTier = tier; // always update (PRD dedupe rule)
-  return alertSubject;
+  return emailPromise.then(() => alertSubject);
 }
 function getStatus(s: Store, id: string) {
   const school = s.schools.find((x) => x.schoolId === id);
@@ -212,4 +256,5 @@ http.createServer(async (req, res) => {
   console.log('[localdev] store: ' + DB_FILE);
   console.log('[localdev] alerts: printed here + saved alertLog (this is what SNS would email)');
   console.log(`[localdev] OpenAQ key: ${OPENAQ_KEY ? 'loaded' : 'MISSING - put openaq=<key> in repo .env'}`);
+  console.log(`[localdev] Gmail SMTP: ${GMAIL ? `configured for ${GMAIL.user} (REAL EMAILS WILL SEND)` : 'not configured - alerts only logged to console'}`);
 });

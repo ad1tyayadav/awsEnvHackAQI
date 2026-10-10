@@ -11,10 +11,61 @@
       ],
       "lastAlertTier": "RED",
       "createdAt": "2026-10-10T11:41:49.105Z"
+    },
+    {
+      "schoolId": "sch_mv2ciiue",
+      "name": "KV No.2",
+      "city": "Kanpur Uttar Pradesh",
+      "lat": 26.469375643596464,
+      "lng": 80.27371026361531,
+      "contactEmails": [
+        "adityaproworks@gmail.com"
+      ],
+      "lastAlertTier": "RED",
+      "createdAt": "2026-10-10T12:03:34.502Z"
+    },
+    {
+      "schoolId": "sch_mv2cukz7",
+      "name": "Live Test School",
+      "city": "Delhi",
+      "lat": 28.6,
+      "lng": 77.2,
+      "contactEmails": [
+        "you@example.com"
+      ],
+      "lastAlertTier": "RED",
+      "createdAt": "2026-10-10T12:12:57.139Z"
     }
   ],
   "readings": {
     "sch_mv2bqjld": [
+      {
+        "schoolId": "sch_mv2bqjld",
+        "ts": "2026-10-10T12:01:27.734Z",
+        "pm25": 180,
+        "aqi": 346,
+        "category": "Very Poor",
+        "tier": "RED",
+        "source": "simulated"
+      },
+      {
+        "schoolId": "sch_mv2bqjld",
+        "ts": "2026-10-10T12:01:27.514Z",
+        "pm25": 180,
+        "aqi": 346,
+        "category": "Very Poor",
+        "tier": "RED",
+        "source": "simulated"
+      },
+      {
+        "schoolId": "sch_mv2bqjld",
+        "ts": "2026-10-10T12:01:24.089Z",
+        "pm25": 180,
+        "aqi": 346,
+        "category": "Very Poor",
+        "tier": "RED",
+        "source": "simulated"
+      },
       {
         "schoolId": "sch_mv2bqjld",
         "ts": "2026-10-10T11:42:04.454Z",
@@ -53,6 +104,48 @@
         "source": "openaq",
         "stationName": "ITO, New Delhi - CPCB"
       }
+    ],
+    "sch_mv2ciiue": [
+      {
+        "schoolId": "sch_mv2ciiue",
+        "ts": "2026-10-10T12:04:00.605Z",
+        "pm25": 180,
+        "aqi": 346,
+        "category": "Very Poor",
+        "tier": "RED",
+        "source": "simulated"
+      }
+    ],
+    "sch_mv2cukz7": [
+      {
+        "schoolId": "sch_mv2cukz7",
+        "ts": "2026-10-10T12:13:02.652Z",
+        "pm25": 180,
+        "aqi": 346,
+        "category": "Very Poor",
+        "tier": "RED",
+        "source": "simulated"
+      },
+      {
+        "schoolId": "sch_mv2cukz7",
+        "ts": "2026-10-07T14:30:00Z",
+        "pm25": 80,
+        "aqi": 166,
+        "category": "Moderate",
+        "tier": "YELLOW",
+        "source": "openaq",
+        "stationName": "R K Puram, Delhi - DPCC"
+      },
+      {
+        "schoolId": "sch_mv2cukz7",
+        "ts": "2026-10-07T14:30:00Z",
+        "pm25": 80,
+        "aqi": 166,
+        "category": "Moderate",
+        "tier": "YELLOW",
+        "source": "openaq",
+        "stationName": "R K Puram, Delhi - DPCC"
+      }
     ]
   },
   "alertLog": [
@@ -61,6 +154,18 @@
       "schoolId": "sch_mv2bqjld",
       "subject": "Air alert: DL Public School is RED (AQI 346)",
       "body": "Air quality alert for DL Public School\n\nCurrent AQI: 346 (RED)\n\n--- Action plan (English) ---\nAll outdoor activity stopped. Keep everyone indoors with windows closed. N95 masks for travel to and from school. Parents are advised to keep children at home if possible. Follow any official order from the local education authority.\n\n--- कार्य योजना (हिंदी) ---\nसभी बाहरी गतिविधियाँ बंद। सभी को खिड़कियाँ बंद करके घर के अंदर रखें। स्कूल आने-जाने के लिए N95 मास्क। माता-पिता को सलाह दी जाती है कि संभव हो तो बच्चों को घर पर रखें। स्थानीय शिक्षा प्राधिकरण के किसी भी आदेश का पालन करें।\n\n---\nAdvisories are guidance based on hourly PM2.5 estimates and do not replace official orders from local authorities."
+    },
+    {
+      "ts": "2026-10-10T12:04:00.605Z",
+      "schoolId": "sch_mv2ciiue",
+      "subject": "Air alert: KV No.2 is RED (AQI 346)",
+      "body": "Air quality alert for KV No.2\n\nCurrent AQI: 346 (RED)\n\n--- Action plan (English) ---\nAll outdoor activity stopped. Keep everyone indoors with windows closed. N95 masks for travel to and from school. Parents are advised to keep children at home if possible. Follow any official order from the local education authority.\n\n--- कार्य योजना (हिंदी) ---\nसभी बाहरी गतिविधियाँ बंद। सभी को खिड़कियाँ बंद करके घर के अंदर रखें। स्कूल आने-जाने के लिए N95 मास्क। माता-पिता को सलाह दी जाती है कि संभव हो तो बच्चों को घर पर रखें। स्थानीय शिक्षा प्राधिकरण के किसी भी आदेश का पालन करें।\n\n---\nAdvisories are guidance based on hourly PM2.5 estimates and do not replace official orders from local authorities."
+    },
+    {
+      "ts": "2026-10-10T12:13:02.652Z",
+      "schoolId": "sch_mv2cukz7",
+      "subject": "Air alert: Live Test School is RED (AQI 346)",
+      "body": "Air quality alert for Live Test School\n\nCurrent AQI: 346 (RED)\n\n--- Action plan (English) ---\nAll outdoor activity stopped. Keep everyone indoors with windows closed. N95 masks for travel to and from school. Parents are advised to keep children at home if possible. Follow any official order from the local education authority.\n\n--- कार्य योजना (हिंदी) ---\nसभी बाहरी गतिविधियाँ बंद। सभी को खिड़कियाँ बंद करके घर के अंदर रखें। स्कूल आने-जाने के लिए N95 मास्क। माता-पिता को सलाह दी जाती है कि संभव हो तो बच्चों को घर पर रखें। स्थानीय शिक्षा प्राधिकरण के किसी भी आदेश का पालन करें।\n\n---\nAdvisories are guidance based on hourly PM2.5 estimates and do not replace official orders from local authorities."
     }
   ]
 }

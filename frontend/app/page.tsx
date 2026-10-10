@@ -75,6 +75,7 @@ export default function Home() {
   const [simulating, setSimulating] = useState(false);
   const [formMsg, setFormMsg] = useState<string | null>(null);
   const [simAlert, setSimAlert] = useState<{ subject: string; body: string } | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   const loadSchools = useCallback(async () => {
     if (USING_DEMO) {
@@ -144,10 +145,36 @@ export default function Home() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       // refresh status (a RED reading + alert email were just generated)
       await loadStatus(selectedId);
+      await loadSchools();
     } catch (e) {
       setError(`Simulate failed. (${(e as Error).message})`);
     } finally {
       setSimulating(false);
+    }
+  }
+
+  /** Manual poll like the deployed EventBridge 30-min job would do. */
+  async function refreshLive() {
+    if (!selectedId || USING_DEMO) return;
+    setRefreshing(true);
+    try {
+      const res = await fetch(`${API_URL}/schools/${selectedId}/refresh`);
+      if (!res.ok) {
+        const errBody = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(errBody.error ?? `HTTP ${res.status}`);
+      }
+      const data = (await res.json()) as Status & { alertFired?: boolean };
+      setStatus(data);
+      setError(null);
+      if (data.alertFired && data.latest) {
+        const email = demo.formatAlertEmail(data.school, data.latest.tier as 'RED' | 'GREEN' | 'YELLOW' | 'ORANGE', data.latest.aqi);
+        setSimAlert({ subject: email.subject, body: email.body });
+      }
+      await loadSchools();
+    } catch (e) {
+      setError(`Refresh failed: ${(e as Error).message}`);
+    } finally {
+      setRefreshing(false);
     }
   }
 
@@ -286,6 +313,15 @@ export default function Home() {
                 <dd>{new Date(latest.ts).toLocaleString()}</dd>
               </dl>
 
+              {!USING_DEMO && (
+                <button
+                  onClick={refreshLive}
+                  disabled={refreshing}
+                  className="w-full rounded-lg bg-blue-600 px-4 py-2.5 font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+                >
+                  {refreshing ? 'Fetching live PM2.5…' : '🔄 Fetch live PM2.5 now'}
+                </button>
+              )}
               <button
                 onClick={simulateSevere}
                 disabled={simulating}
@@ -343,7 +379,7 @@ export default function Home() {
 
       {simAlert && (
         <AlertEmail
-          school="your school"
+          school={status?.school.name ?? 'your school'}
           tier={latest?.tier ?? 'RED'}
           aqi={latest?.aqi ?? 329}
           subject={simAlert.subject}
