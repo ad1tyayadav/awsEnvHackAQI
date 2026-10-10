@@ -1,0 +1,10 @@
+version = 0.1
+[default.global.parameters]
+stack_name = "clean-air-planner"
+region = "ap-south-1"
+resolve_s3 = true
+s3_prefix = "clean-air-planner"
+[default.deploy.parameters]
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = ["OpenAQApiKey=\"0f7c9cc42b085b9b892c380c4cbd17e503366af0aa7c65928798f6597cf32ede\"", "Stage=\"prod\""]
+confirm_changeset = false
