@@ -1,35 +1,37 @@
 // fetchAndEvaluate Lambda handler.
-// Phase 2: loads all schools, fetches nearest PM2.5 from OpenAQ, stores readings.
-// Phase 3/4 add AQI/tier computation and alerting on top.
-import { getAllSchools, putReading } from '../../lib/db';
+// EventBridge (Phase 5) or manual invoke: for every school fetch the nearest
+// OpenAQ PM2.5 reading and run the shared evaluate-and-alert path, which stores
+// the reading, publishes an SNS alert on tier escalation, and always updates
+// the school's lastAlertTier.
+import { getAllSchools } from '../../lib/db';
 import { fetchNearestPM25, OpenAqError } from '../../lib/openaq';
+import { evaluateSchool } from '../../lib/evaluate';
+import { snsApi } from '../../lib/alerts';
 
-interface ApiGatewayEvent {
-  body?: string | null;
-}
-
-export const handler = async (event: ApiGatewayEvent = {}) => {
+export const handler = async (event: { body?: string | null } = {}) => {
   const apiKey = process.env.OPENAQ_API_KEY ?? '';
+  const topicArn = process.env.ALERT_TOPIC_ARN ?? '';
+
+  const publish = async (schoolId: string, subject: string, body: string) => {
+    if (!topicArn) {
+      console.error(JSON.stringify({ msg: 'no ALERT_TOPIC_ARN, alert not published', schoolId }));
+      return;
+    }
+    await snsApi.publish(topicArn, schoolId, subject, body);
+  };
+
   const schools = await getAllSchools();
   console.log(JSON.stringify({ msg: 'fetchAndEvaluate start', schools: schools.length }));
 
   let ok = 0, failed = 0;
   for (const school of schools) {
     try {
-      const reading = await fetchNearestPM25(school.lat, school.lng, apiKey);
-      await putReading({
-        schoolId: school.schoolId,
-        ts: reading.measuredAt,
-        pm25: reading.pm25,
-        source: 'openaq',
-        stationName: reading.stationName,
-        ttl: Math.floor(Date.now() / 1000) + 7 * 24 * 3600,
-      });
+      const r = await fetchNearestPM25(school.lat, school.lng, apiKey);
+      const result = await evaluateSchool(school, r.pm25, 'openaq', r.stationName, r.measuredAt, publish);
       ok += 1;
-      console.log(JSON.stringify({
-        msg: 'reading stored', schoolId: school.schoolId,
-        pm25: reading.pm25, station: reading.stationName,
-      }));
+      if (!result.alertSent) {
+        console.log(JSON.stringify({ msg: 'evaluated', schoolId: school.schoolId, tier: result.tier }));
+      }
     } catch (err) {
       failed += 1;
       const reason = err instanceof OpenAqError ? `${err.reason}: ${err.detail}` : String(err);

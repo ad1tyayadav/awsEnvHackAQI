@@ -86,7 +86,12 @@ Resources:
         - AttributeName: ts
           KeyType: RANGE
 
-  # Placeholder Lambda (Phase 2+ fills in real logic)
+  # SNS topic for air alerts (Phase 4)
+  AirAlertsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub cleanair-alerts-${Stage}
+
   FetchAndEvaluateFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -98,10 +103,17 @@ Resources:
           READINGS_TABLE: !Ref ReadingsTable
           ADVISORY_TABLE: !Ref AdvisoryCacheTable
           ALERTS_TABLE: !Ref AlertsTable
+          ALERT_TOPIC_ARN: !Ref AirAlertsTopic
       Policies:
         - DynamoDBCrudPolicy: { TableName: !Ref SchoolsTable }
         - DynamoDBCrudPolicy: { TableName: !Ref ReadingsTable }
         - DynamoDBCrudPolicy: { TableName: !Ref AdvisoryCacheTable }
+        - DynamoDBCrudPolicy: { TableName: !Ref AlertsTable }
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action: sns:Publish
+              Resource: !Ref AirAlertsTopic
 
 Outputs:
   FetchAndEvaluateArn:
