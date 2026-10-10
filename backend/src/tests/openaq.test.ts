@@ -131,8 +131,8 @@ test('fetchNearestPM25 happy path returns fresh reading', async () => {
   expect(r.measuredAt).toBe(fresh);
 });
 
-test('fetchNearestPM25 throws stale_data when reading older than 3h', async () => {
-  const stale = new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString();
+test('fetchNearestPM25 throws stale_data when reading older than 96h', async () => {
+  const stale = new Date(Date.now() - 100 * 60 * 60 * 1000).toISOString(); // > 4 days
   const f: FetchLike = async (url) => {
     if (url.includes('/v3/locations?coordinates=') || url.includes('/v3/locations/'))
       return jsonResponse(200, LOCATION_BODY);

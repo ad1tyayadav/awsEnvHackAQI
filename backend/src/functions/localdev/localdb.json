@@ -1,0 +1,66 @@
+{
+  "schools": [
+    {
+      "schoolId": "sch_mv2bqjld",
+      "name": "DL Public School",
+      "city": "Delhi",
+      "lat": 28.6,
+      "lng": 77.2,
+      "contactEmails": [
+        "you@example.com"
+      ],
+      "lastAlertTier": "RED",
+      "createdAt": "2026-10-10T11:41:49.105Z"
+    }
+  ],
+  "readings": {
+    "sch_mv2bqjld": [
+      {
+        "schoolId": "sch_mv2bqjld",
+        "ts": "2026-10-10T11:42:04.454Z",
+        "pm25": 180,
+        "aqi": 346,
+        "category": "Very Poor",
+        "tier": "RED",
+        "source": "simulated"
+      },
+      {
+        "schoolId": "sch_mv2bqjld",
+        "ts": "2026-10-10T11:42:04.346Z",
+        "pm25": 180,
+        "aqi": 346,
+        "category": "Very Poor",
+        "tier": "RED",
+        "source": "simulated"
+      },
+      {
+        "schoolId": "sch_mv2bqjld",
+        "ts": "2026-10-07T14:30:00Z",
+        "pm25": 63,
+        "aqi": 108,
+        "category": "Moderate",
+        "tier": "YELLOW",
+        "source": "openaq",
+        "stationName": "ITO, New Delhi - CPCB"
+      },
+      {
+        "schoolId": "sch_mv2bqjld",
+        "ts": "2026-10-07T14:30:00Z",
+        "pm25": 63,
+        "aqi": 108,
+        "category": "Moderate",
+        "tier": "YELLOW",
+        "source": "openaq",
+        "stationName": "ITO, New Delhi - CPCB"
+      }
+    ]
+  },
+  "alertLog": [
+    {
+      "ts": "2026-10-10T11:42:04.346Z",
+      "schoolId": "sch_mv2bqjld",
+      "subject": "Air alert: DL Public School is RED (AQI 346)",
+      "body": "Air quality alert for DL Public School\n\nCurrent AQI: 346 (RED)\n\n--- Action plan (English) ---\nAll outdoor activity stopped. Keep everyone indoors with windows closed. N95 masks for travel to and from school. Parents are advised to keep children at home if possible. Follow any official order from the local education authority.\n\n--- कार्य योजना (हिंदी) ---\nसभी बाहरी गतिविधियाँ बंद। सभी को खिड़कियाँ बंद करके घर के अंदर रखें। स्कूल आने-जाने के लिए N95 मास्क। माता-पिता को सलाह दी जाती है कि संभव हो तो बच्चों को घर पर रखें। स्थानीय शिक्षा प्राधिकरण के किसी भी आदेश का पालन करें।\n\n---\nAdvisories are guidance based on hourly PM2.5 estimates and do not replace official orders from local authorities."
+    }
+  ]
+}
