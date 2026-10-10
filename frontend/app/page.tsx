@@ -6,8 +6,12 @@
 // bilingual advisory toggle, 24h trend list, "Simulate severe day" button,
 // loading/empty/error states, accessibility (color + label), disclaimer.
 import { useCallback, useEffect, useState } from 'react';
+import * as demo from '../lib/demoMode';
+import { AlertEmail } from '../lib/alertInbox';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? '';
+const DEMO_MODE = !API_URL || API_URL.includes('localhost') === false && API_URL === '';
+const USING_DEMO = !API_URL.trim(); // fall back to in-browser demo when no API is baked in
 
 interface School {
   schoolId: string;
@@ -70,8 +74,14 @@ export default function Home() {
   const [busy, setBusy] = useState(false);
   const [simulating, setSimulating] = useState(false);
   const [formMsg, setFormMsg] = useState<string | null>(null);
+  const [simAlert, setSimAlert] = useState<{ subject: string; body: string } | null>(null);
 
   const loadSchools = useCallback(async () => {
+    if (USING_DEMO) {
+      setSchools(demo.getSchools());
+      setError(null);
+      return;
+    }
     try {
       const res = await fetch(`${API_URL}/schools`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -83,7 +93,7 @@ export default function Home() {
       setError(`Could not reach the API at ${API_URL} — check it is deployed. (${(e as Error).message})`);
       setSchools([]);
     }
-  }, [selectedId]);
+  }, [selectedId, USING_DEMO]);
 
   useEffect(() => {
     void loadSchools();
@@ -91,6 +101,10 @@ export default function Home() {
   }, []);
 
   const loadStatus = useCallback(async (id: string) => {
+    if (USING_DEMO) {
+      setStatus(demo.getStatus(id) as unknown as Status);
+      return;
+    }
     setBusy(true);
     try {
       const res = await fetch(`${API_URL}/schools/${id}/status`);
@@ -112,6 +126,16 @@ export default function Home() {
     if (!selectedId) return;
     setSimulating(true);
     try {
+      if (USING_DEMO) {
+        const { status: s, alertFired } = demo.simulate(selectedId, { tier: 'RED' });
+        if (s && alertFired) {
+          const email = demo.formatAlertEmail(s.school, 'RED', s.latest!.aqi);
+          setSimAlert({ subject: email.subject, body: email.body });
+        }
+        if (s) setStatus(s as unknown as Status);
+        await loadSchools();
+        return;
+      }
       const res = await fetch(`${API_URL}/schools/${selectedId}/simulate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -120,7 +144,6 @@ export default function Home() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       // refresh status (a RED reading + alert email were just generated)
       await loadStatus(selectedId);
-      alert('Simulated severe day: status is now RED and a bilingual alert email was sent to all confirmed subscribers.');
     } catch (e) {
       setError(`Simulate failed. (${(e as Error).message})`);
     } finally {
@@ -134,10 +157,19 @@ export default function Home() {
   return (
     <main className="mx-auto max-w-5xl px-4 py-8">
       <header className="mb-8">
-        <h1 className="text-3xl font-bold tracking-tight">Clean Air Day-Planner for Schools</h1>
-        <p className="mt-1 text-slate-600">
-          When the air turns bad, every school gets a clear, bilingual action plan before the first bell, automatically.
-        </p>
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight">Clean Air Day-Planner for Schools</h1>
+            <p className="mt-1 text-slate-600">
+              When the air turns bad, every school gets a clear, bilingual action plan before the first bell, automatically.
+            </p>
+          </div>
+          {USING_DEMO && (
+            <span className="rounded-full bg-blue-100 text-blue-800 border border-blue-300 px-3 py-1 text-xs font-medium">
+              Demo mode · same rules, in-browser
+            </span>
+          )}
+        </div>
       </header>
 
       {error && (
@@ -150,10 +182,34 @@ export default function Home() {
         {/* left: add school + list */}
         <div className="space-y-8">
           <AddSchoolForm
-            onCreated={async (created) => {
-              setFormMsg(`✅ "${created}" added. Each contact email will receive an SNS confirmation link — alerts only arrive after they confirm.`);
-              await loadSchools();
-              if (created.schoolId) setSelectedId(created.schoolId);
+            usingDemo={USING_DEMO}
+            onCreated={async (created, args) => {
+              if (USING_DEMO && args) {
+                const s = demo.createSchool({
+                  name: created.name,
+                  city: args.city,
+                  lat: args.lat,
+                  lng: args.lng,
+                  contactEmails: args.emails,
+                });
+                setFormMsg(`✅ "${created.name}" added (demo).`);
+                await loadSchools();
+                setSelectedId(s.schoolId);
+              } else {
+                const res = await fetch(`${API_URL}/schools`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(args),
+                });
+                if (!res.ok) {
+                  const errBody = (await res.json().catch(() => ({ error: `HTTP ${res.status}` }))) as { error?: string };
+                  setFormMsg(`Could not add school: ${errBody.error ?? `HTTP ${res.status}`}`);
+                } else {
+                  setFormMsg(`✅ "${created.name}" added. Each contact email will receive an SNS confirmation link — alerts only arrive after they confirm.`);
+                  await loadSchools();
+                  if (created.schoolId) setSelectedId(created.schoolId);
+                }
+              }
             }}
             onError={setFormMsg}
           />
@@ -285,6 +341,17 @@ export default function Home() {
       </section>
       {formMsg && <p className="mt-6 rounded-lg bg-blue-50 p-3 text-sm text-blue-800">{formMsg}</p>}
 
+      {simAlert && (
+        <AlertEmail
+          school="your school"
+          tier={latest?.tier ?? 'RED'}
+          aqi={latest?.aqi ?? 329}
+          subject={simAlert.subject}
+          body={simAlert.body}
+          onClose={() => setSimAlert(null)}
+        />
+      )}
+
       <footer className="mt-12 border-t border-slate-200 pt-4 text-xs text-slate-500">
         <p>
           Advisories are guidance based on hourly PM2.5 estimates and do not replace official orders from local
@@ -296,8 +363,9 @@ export default function Home() {
   );
 }
 
-function AddSchoolForm({ onCreated, onError }: {
-  onCreated: (school: { name: string; schoolId?: string }) => void | Promise<void>;
+function AddSchoolForm({ usingDemo, onCreated, onError }: {
+  usingDemo: boolean;
+  onCreated: (school: { name: string; schoolId?: string }, ctx?: { city: string; lat: number; lng: number; emails: string[] }) => void | Promise<void>;
   onError: (msg: string) => void;
 }) {
   const [name, setName] = useState('');
@@ -323,6 +391,11 @@ function AddSchoolForm({ onCreated, onError }: {
 
     setSubmitting(true);
     try {
+      if (usingDemo) {
+        await onCreated({ name: name.trim() }, { city: city.trim(), lat: latNum, lng: lngNum, emails: emailList });
+        setName(''); setCity(''); setLat(''); setLng(''); setEmails('');
+        return;
+      }
       const res = await fetch(`${API_URL}/schools`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -335,6 +408,8 @@ function AddSchoolForm({ onCreated, onError }: {
         await onCreated({ name: name.trim(), schoolId: ((await res.json()) as School).schoolId });
         setName(''); setCity(''); setLat(''); setLng(''); setEmails('');
       }
+    } catch (e) {
+      onError(`Network error: ${(e as Error).message}`);
     } finally {
       setSubmitting(false);
     }
