@@ -112,9 +112,13 @@ export const TEXTS = {
     `⚠️ Air alert — the air in your area is ${tier} (AQI ${aqi}).`,
 } as const;
 
-/** '2026-10-11T06:00:00Z' -> '06:00 UTC'; falls back to the raw string. */
+/**
+ * '2026-10-11T06:00:00Z' -> '2026-10-11 06:00 UTC'; falls back to the raw
+ * string. The date is kept: nearby stations can report a few days late, so the
+ * time alone would make an old reading look like it was measured just now.
+ */
 function measuredLabel(measuredAt: string): string {
-  return measuredAt.length >= 16 ? `${measuredAt.slice(11, 16)} UTC` : measuredAt;
+  return measuredAt.length >= 16 ? `${measuredAt.slice(0, 10)} ${measuredAt.slice(11, 16)} UTC` : measuredAt;
 }
 
 /** The automatic alert sent when the air turns bad. Pure. */
@@ -139,7 +143,7 @@ export function formatAirReport(reading: Pm25Reading): string {
   const measured = measuredLabel(reading.measuredAt);
 
   return [
-    `🌫️ Air right now in your area`,
+    `🌫️ Latest air reading in your area`,
     '',
     `AQI ${aqi} — ${category} (${tier})`,
     `PM2.5 ${reading.pm25} µg/m³, measured ${measured}`,
@@ -190,12 +194,27 @@ async function reply(
  * /start: greet and offer the share-location button. Deliberately writes
  * NOTHING, which is what makes re-running /start harmless - a user who taps it
  * twice gets the same one row, never a duplicate.
+ *
+ * A returning user already has a location, so they get the latest reading in the
+ * same reply: tapping /start is their way of asking "what is the air like now?".
+ * Best effort, exactly like onboarding - if OpenAQ is unreachable the greeting
+ * still goes out.
  */
 async function handleStart(chatId: number, deps: BotDeps): Promise<BotOutcome> {
   const existing = await deps.getSubscriber(String(chatId));
   const known = Boolean(existing?.locKey);
   const text = known ? TEXTS.welcomeBack : TEXTS.welcome;
-  return reply(deps, chatId, text, known ? 'start.welcome_back' : 'start.welcome', locationKeyboard(TEXTS.shareButton));
+
+  let body = text;
+  if (known && typeof existing?.lat === 'number' && typeof existing?.lng === 'number') {
+    try {
+      body = `${text}\n\n${formatAirReport(await deps.fetchPm25(existing.lat, existing.lng))}`;
+    } catch (err) {
+      console.warn(JSON.stringify({ msg: 'openaq failed during welcome-back', chatId, error: String(err) }));
+    }
+  }
+
+  return reply(deps, chatId, body, known ? 'start.welcome_back' : 'start.welcome', locationKeyboard(TEXTS.shareButton));
 }
 
 /** A shared location is the only thing we ever store: coordinates + a 2 km cell. */

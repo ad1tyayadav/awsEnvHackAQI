@@ -130,6 +130,32 @@ test('a returning user gets the shorter welcome-back text, not a second sign-up'
   expect(sent[0]!.text).not.toBe(TEXTS.welcome);
 });
 
+test('/start for a returning user also shows the latest AQI and action plan', async () => {
+  const { deps, sent, fetched } = fakeDeps({ existing: { '555': existingSub('28.62,77.20', 28.6139, 77.209) } });
+
+  const outcome = await handleIntent({ kind: 'start', chatId: 555 }, deps);
+
+  expect(outcome.action).toBe('start.welcome_back');
+  expect(fetched).toEqual([{ lat: 28.6139, lng: 77.209 }]);
+  expect(sent[0]!.text).toContain(TEXTS.welcomeBack);
+  expect(sent[0]!.text).toContain('AQI 249');
+  expect(sent[0]!.text).toContain('ORANGE');
+  expect(sent[0]!.text).toContain('DPCC Anand Vihar');
+  expect(sent[0]!.text).toContain('Avoid heavy outdoor exertion');
+});
+
+test('/start still greets a returning user when OpenAQ is down', async () => {
+  const { deps, sent } = fakeDeps({
+    existing: { '555': existingSub('28.62,77.20', 28.6139, 77.209) },
+    pm25: 'api_error',
+  });
+
+  const outcome = await handleIntent({ kind: 'start', chatId: 555 }, deps);
+
+  expect(outcome.action).toBe('start.welcome_back');
+  expect(sent[0]!.text).toBe(TEXTS.welcomeBack);
+});
+
 test('sharing a location stores it and confirms with the ~2 km cell (no exact address)', async () => {
   const { deps, sent, saved } = fakeDeps();
 

@@ -30,7 +30,7 @@ exists — the delivery does not.
 ```
 ⚠️ Air alert — the air in your area is ORANGE (AQI 208).
 
-PM2.5 105 µg/m³, measured 06:00 UTC
+PM2.5 105 µg/m³, measured 2026-10-11 06:00 UTC
 Station: Ghaziabad - DPCC
 
 What to do:
