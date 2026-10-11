@@ -5,7 +5,8 @@
   "private": true,
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build": "sam build"
   },
   "devDependencies": {
     "@types/aws-lambda": "^8.10.145",

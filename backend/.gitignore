@@ -2,6 +2,8 @@ node_modules/
 .aws-sam/
 .env*
 !.env.example
+# sam deploy --guided writes parameter values (i.e. secrets) in here in plaintext.
+samconfig.toml
 .localstore/
 dist/
 out/

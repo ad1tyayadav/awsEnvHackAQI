@@ -43,16 +43,51 @@ Docs used while building (Oct 2026, not from memory):
 ## 2. Deploy (this is what gives Telegram a public HTTPS URL)
 
 Telegram cannot reach `localhost`, so the webhook needs a deployed endpoint.
-Everything is in `backend/template.yaml`.
+Everything is in `backend/template.yaml`. This is the whole deploy, start to
+finish; every command below was run on this project before being written down.
+
+### 2.1 Check the four prerequisites
 
 ```bash
-cd backend
-npm test                      # should be green before you deploy anything
-sam build
-sam deploy --guided           # stack: clean-air-planner, region: ap-south-1
+aws sts get-caller-identity      # prints your account id -> AWS credentials work
+aws configure get region         # ap-south-1
+sam.cmd --version                # SAM CLI, version 1.x
+node -v                          # v20 or newer
 ```
 
-When prompted for parameters:
+- **On Windows, call `sam.cmd`, not `sam`.** Git Bash does not do Windows
+  `PATHEXT` lookup, so a bare `sam` gives `sam: command not found` even when SAM
+  CLI is installed. In PowerShell or `cmd` plain `sam` is fine.
+- **`sam build` needs `esbuild` on `PATH`.** It is already a dev-dependency, so
+  `npm run build` (which is `sam build`, run through npm, which puts
+  `node_modules/.bin` on `PATH`) finds it. Plain `sam build` fails with
+  *"Cannot find esbuild. esbuild must be installed on the host machine"* unless
+  you export it first: `export PATH="$PWD/node_modules/.bin:$PATH"`.
+- Docker Desktop only matters for `sam local invoke`. For deploying, the
+  bundled `index.js` in `.aws-sam/build/` is all that is uploaded.
+
+### 2.2 Get the three values into the shell
+
+`.env` lives at the **repo root** (gitignored). Copy the tracked example once and
+fill in the three values:
+
+```bash
+cp .env.example .env           # from the repo root, then edit it
+cd backend                     # every deploy command below runs from here
+set -a; source ../.env; set +a # nothing loads .env by itself; this exports it
+
+# pre-flight: all three must print a length, not MISSING
+for v in OPENAQ_API_KEY TELEGRAM_BOT_TOKEN TELEGRAM_WEBHOOK_SECRET; do
+  eval "val=\$$v"; [ -n "$val" ] && echo "$v: ok" || echo "$v: MISSING"
+done
+```
+
+If sourcing prints something like `../.env: line 3: MyPassword: command not
+found`, that line is not a `KEY=value` pair — a pasted note or a raw AWS key
+pair — and bash tried to run it as a command. Harmless for the three variables
+above, but AWS access keys belong in `~/.aws/credentials` (`aws configure`),
+which is where the CLI already reads them from; keeping extra copies in `.env`
+only adds another place for them to leak.
 
 | Parameter | Value |
 |---|---|
@@ -61,42 +96,56 @@ When prompted for parameters:
 | `TelegramWebhookSecret` | the random string from step 1.3 |
 | `Stage` | `prod` (default) |
 
-Both Telegram values are `NoEcho`, so they never appear in deploy output or logs.
-The same values can be supplied non-interactively. Keep them in `.env` (copy the
-tracked `.env.example` first) rather than retyping them:
+Never put AWS access keys in `.env`; the AWS CLI uses `aws configure`.
+**Never put parameter values in `backend/samconfig.toml`.** `sam deploy --guided`
+writes every answer you type into that file in plaintext, and it is (now)
+gitignored for exactly that reason — an earlier version of it committed the
+OpenAQ key. Pass secrets on the command line, not in a config file.
+
+### 2.3 Build and deploy
 
 ```bash
-cp .env.example .env           # then fill in the three values
-set -a; source .env; set +a    # exports them for the shell
+npm test                # green before you deploy anything
+npm run build           # = sam build; must print "Build Succeeded"
+
+sam.cmd deploy \
+  --parameter-overrides \
+    OpenAQApiKey="$OPENAQ_API_KEY" \
+    TelegramBotToken="$TELEGRAM_BOT_TOKEN" \
+    TelegramWebhookSecret="$TELEGRAM_WEBHOOK_SECRET"
 ```
 
-Nothing reads `.env` automatically — there is no dotenv in the project, so it is
-a safe notepad plus the source for the command below. Never put AWS access keys
-in it; the AWS CLI uses `aws configure` / `aws sso login`.
+`backend/samconfig.toml` supplies the stack name (`clean-air-planner`), the
+region (`ap-south-1`), `resolve_s3` (SAM creates its own artifact bucket),
+`capabilities = CAPABILITY_IAM` (the Lambdas need execution roles) and
+`confirm_changeset = false`, so the command above is all you type. Both Telegram
+values are `NoEcho`, so they never appear in the deploy output or CloudWatch.
+
+Resources this creates: 1 DynamoDB table (pay-per-request), 2 Lambdas, 1 HTTP
+API, 1 EventBridge rule. Nothing bills hourly, and there is no email/SNS path
+any more.
+
+Read the stack outputs instead of copying by eye — you need **`WebhookUrl`**:
 
 ```bash
-sam deploy --parameter-overrides \
-  OpenAQApiKey="$OPENAQ_KEY" \
-  TelegramBotToken="$TELEGRAM_BOT_TOKEN" \
-  TelegramWebhookSecret="$TELEGRAM_WEBHOOK_SECRET"
+aws cloudformation describe-stacks --stack-name clean-air-planner \
+  --region ap-south-1 --query "Stacks[0].Outputs" --output table
 ```
-
-Copy the **`ApiBaseUrl`** from the deploy output — you need it next. Resources
-this creates: 5 DynamoDB tables (pay-per-request), 3 Lambdas, 1 HTTP API, 1 SNS
-topic, 1 EventBridge schedule. Nothing bills hourly.
 
 ---
 
 ## 3. Point Telegram at your Lambda
 
 ```bash
-API=https://<api-id>.execute-api.ap-south-1.amazonaws.com/prod
-TOKEN=<bot token>
-SECRET=<webhook secret>
+set -a; source ../.env; set +a
+URL=$(aws cloudformation describe-stacks --stack-name clean-air-planner \
+  --region ap-south-1 --query "Stacks[0].Outputs[?OutputKey=='WebhookUrl'].OutputValue" \
+  --output text)
+echo "$URL"   # .../prod/telegram/webhook
 
-curl "https://api.telegram.org/bot$TOKEN/setWebhook" \
-  -d "url=$API/telegram/webhook" \
-  -d "secret_token=$SECRET" \
+curl "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
+  -d "url=$URL" \
+  -d "secret_token=$TELEGRAM_WEBHOOK_SECRET" \
   -d 'allowed_updates=["message","my_chat_member"]'
 ```
 
@@ -105,26 +154,32 @@ curl "https://api.telegram.org/bot$TOKEN/setWebhook" \
 - `allowed_updates` keeps the noise down: messages (commands, locations) plus
   `my_chat_member` so a block/unblock is visible.
 
-Before deploying, you can validate the template without any AWS credentials:
+Before deploying, validate the template. No AWS credentials needed:
 
 ```bash
-pip install cfn-lint
-cfn-lint --region ap-south-1 --template backend/template.yaml
+cd backend && sam.cmd validate --region ap-south-1     # "is a valid SAM Template"
 ```
 
-Expect one warning only (`W2531`, the deprecated `nodejs20.x` runtime) and no
-`E####` errors. `backend/scripts/validate-template.mjs` is the offline stand-in
-that runs without Python; it checks structure, not CloudFormation semantics.
+For deeper linting, `pip install cfn-lint` then
+`cfn-lint --region ap-south-1 --template template.yaml`. Expect no `E####`
+errors and one warning (`W2531`, the deprecated `nodejs20.x` runtime — see §6).
+`backend/scripts/validate-template.mjs` is the offline stand-in that runs
+without Python; it checks structure, not CloudFormation semantics.
 
 Verify the webhook registration:
 
 ```bash
-curl "https://api.telegram.org/bot$TOKEN/getWebhookInfo"
+curl "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/getWebhookInfo"
 ```
 
 Expect `url` = your endpoint and `pending_update_count` at or near 0. If
 `last_error_message` shows a 403, the secret in `setWebhook` and the secret in
-the Lambda disagree — re-run `setWebhook`.
+the Lambda disagree — re-run `setWebhook` with the right `secret_token`.
+
+Two things to know before you keep polling locally: `setWebhook` and
+`scripts/tg-local.ts` are mutually exclusive (the local runner calls
+`deleteWebhook` first), so after a deploy stop using the local runner and test
+on the phone instead.
 
 ---
 
@@ -224,6 +279,76 @@ prints, verbatim, every message a user would receive: `/start`, sharing a
 location, a repeated `/start`, `/status`, `/stop`, free text, then two scheduler
 runs showing three alerts going out and the second run staying silent. No AWS,
 no OpenAQ, no bot token. Use it to proof-read the copy before a demo.
+
+---
+
+## 6. Making it public (anyone can use it)
+
+Nothing has to be "published". A Telegram bot is public the moment the webhook
+is registered: anyone who opens it can `/start`, share a location and get their
+own alerts. There is no account, no approval step and no dashboard to hand out.
+
+What is worth doing before judges or users touch it:
+
+1. **Get the link.** `curl "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/getMe"`
+   returns the `username`; the public link is `https://t.me/<username>`
+   (this project's is `https://t.me/VayuAQI_bot`).
+2. **BotFather polish** — same chat as step 1.1: `/setdescription` (the long text
+   on the empty chat), `/setabouttext` (the short one shown in the profile),
+   `/setuserpic`, and `/setcommands` (already in step 1.4). A public bot with no
+   description looks unfinished to a first-time user.
+3. **Prove it is really public**: from a *different* Telegram account (a friend's
+   phone), `/start` and share a location. They get their own reading and their own
+   row — the table is keyed by `chatId`, so two people in the same neighbourhood
+   share one OpenAQ lookup and never see each other's data.
+4. **Set the $5 budget alarm** (PRD §13, still outstanding). Amount, unit and
+   notification shape below come from
+   `aws budgets create-budget --generate-cli-skeleton`:
+
+   ```bash
+   ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+   aws budgets create-budget --account-id "$ACCOUNT" \
+     --budget '{"BudgetName":"clean-air-5usd","BudgetLimit":{"Amount":"5","Unit":"USD"},"TimeUnit":"MONTHLY","BudgetType":"COST"}' \
+     --notifications-with-subscribers '[{"Notification":{"NotificationType":"ACTUAL","ComparisonOperator":"GREATER_THAN","Threshold":80},"Subscribers":[{"SubscriptionType":"EMAIL","Address":"you@example.com"}]}]'
+   ```
+
+   Replace the email with one you read. AWS Budgets is free for the first two
+   budgets; email alerts only, so nothing bills hourly.
+5. **Optional: cap the log noise.** Lambda log groups default to *never expire*.
+   Logs are cheap but unbounded, so set a retention:
+
+   ```bash
+   aws logs put-retention-policy --region ap-south-1 \
+     --log-group-name /aws/lambda/cleanair-telegram-webhook-prod \
+     --retention-in-days 14
+   ```
+
+### Why "public" does not mean "expensive"
+
+| Rail | Where |
+|---|---|
+| Throttling **10 rps / burst 20** on the HTTP API, so a spammer cannot run the bill up | `template.yaml`, `HttpApi.DefaultRouteSettings` |
+| **One OpenAQ call per ~2 km cell** per 30-minute cycle, no matter how many people are in it | `runCitizenFanout` in `src/lib/fanout.ts` |
+| DynamoDB **on-demand** and 1 table; the scheduler runs 48 times a day | `template.yaml` |
+| A user who blocked the bot is marked `blocked` and never retried | `src/lib/fanout.ts` |
+| Only the ~2 km cell is stored — no phone number, no contacts, no message history | see the row table below |
+
+### One maintenance item to know about
+
+The Lambda runtime is `nodejs20.x`, which AWS deprecated on **Apr 30, 2026**.
+Deploying today still works; AWS blocks *new* functions on **Feb 1, 2027** and
+*updates* on **Mar 3, 2027**. Changing `Runtime: nodejs20.x` to `nodejs22.x` in
+`template.yaml` and redeploying is the whole fix (source is bundled by esbuild to
+`es2022`, so nothing else changes), and it clears the `W2531` lint warning.
+
+### Tear-down
+
+```bash
+sam.cmd delete --stack-name clean-air-planner --region ap-south-1
+```
+
+Then delete the SAM-managed artifact bucket (`aws-sam-cli-managed-default-samcli…`)
+if you want the account byte-for-byte as you found it.
 
 ---
 

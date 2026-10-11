@@ -7,11 +7,11 @@
 ## Phase 0: Setup (human-driven)
 
 - [ ] 0.1 Verify student status on AWS Builder Center (Verify by: confirmation page / screenshot)
-- [ ] 0.2 Create AWS account, claim free credits, set AWS Budgets alert at $5 (Verify by: Budgets console shows the alarm)
-- [ ] 0.3 Install AWS CLI, SAM CLI, Node 20, Git (Verify by: `aws --version`, `sam --version`, `node -v`, `git --version` all print versions)
-- [ ] 0.4 Run `aws configure` with region `ap-south-1` (Verify by: `aws sts get-caller-identity` returns your account ID)
-- [ ] 0.5 Create a free OpenAQ account and generate an API key (Verify by: `curl -H "X-API-Key: <key>" https://api.openaq.org/v3/locations?limit=1` returns 200)
-- [ ] 0.6 Create the GitHub repo; push `PRD.md`, `AGENTS.md`, and this `PROGRESS.md` to main (Verify by: files visible on GitHub)
+- [ ] 0.2 Create AWS account, claim free credits, set AWS Budgets alert at $5 (Verify by: Budgets console shows the alarm) — **account exists (701364614914) but the $5 alarm is still NOT set.** Ready-to-run command in `docs/TELEGRAM_BOT.md` §6.4; only the notification email is missing. Still a PRD §15 item.
+- [x] 0.3 Install AWS CLI, SAM CLI, Node, Git (Verify by: `aws --version`, `sam --version`, `node -v`, `git --version` all print versions) — aws-cli/2.37.12, SAM CLI 1.168.0, node v24.11.1 (Node 20 not required: esbuild targets es2022 and the runtime is pinned in `template.yaml`), git present. NOTE for Windows Git Bash: call `sam.cmd`, not `sam` (no PATHEXT lookup there).
+- [x] 0.4 Run `aws configure` with region `ap-south-1` (Verify by: `aws sts get-caller-identity` returns your account ID) — `aws configure list` shows region ap-south-1 from `~/.aws/config`; `aws sts get-caller-identity` returns account 701364614914.
+- [x] 0.5 Create a free OpenAQ account and generate an API key (Verify by: `curl -H "X-API-Key: <key>" https://api.openaq.org/v3/locations?limit=1` returns 200) — HTTP 200, and a live query for `parameters_id=2` within 25 km of Delhi returns real stations (e.g. "Delhi Technological University, Delhi - CPCB").
+- [x] 0.6 Create the GitHub repo; push `PRD.md`, `AGENTS.md`, and this `PROGRESS.md` to main (Verify by: files visible on GitHub) — origin `git@github.com:ad1tyayadav/awsEnvHackAQI.git`; `origin/main` is at the same commit as local `main` (pushed).
 
 ---
 
@@ -296,13 +296,35 @@ and they can ask for a reading manually any time. Decisions: **English only** (n
 
 ---
 
+## Phase 9D (go-live): deploy the bot so anyone can use it
+
+**Goal:** the deployed bot answers a stranger's `/start` with real air data and alerts automatically every 30 minutes, with no laptop involved. Runbook: `docs/TELEGRAM_BOT.md` §2–§6.
+
+- [x] 9D.1 Template validated with the real SAM CLI, not just the offline stand-in (Verify by: `sam validate --region ap-south-1` says "is a valid SAM Template") — first time the SAM CLI was run in this project. `backend/scripts/validate-template.mjs` remains the no-Python fallback.
+- [x] 9D.2 `sam build` actually succeeds (Verify by: `.aws-sam/build/*/index.js` produced and loadable) — it FAILED first: SAM needs `esbuild` on `PATH` (`Esbuild Failed: Cannot find esbuild`). Fixed by adding a `build` script to `backend/package.json` (`npm run build` = `sam build`; npm puts `node_modules/.bin` on PATH) and documenting the manual `export PATH="$PWD/node_modules/.bin:$PATH"` fallback. Both bundles are ~1.3 MB, contain the AWS SDK, export `handler`, and loading them in plain node gives the expected exports; invoking the webhook bundle with a bad secret really returns 403.
+- [x] 9D.3 SECURITY LEAK FIXED: `backend/samconfig.toml` was committed (317ad56) and pushed with the OpenAQ API key in plaintext — `sam deploy --guided` had written it there. Removed the key, added `samconfig.toml` to `backend/.gitignore`, untracked it, and the deploy now takes secrets as `--parameter-overrides` from the gitignored `.env`. **DEVELOPER ACTION: rotate the OpenAQ key** — it is in the git history and on GitHub, so deleting the file is not enough.
+- [x] 9D.4 Deploy steps corrected for what actually works: `sam deploy` on its own fails (no stack name, no capabilities, no artifact bucket), so the runbook command now carries `--parameter-overrides` with `stack_name`/`region`/`resolve_s3`/`CAPABILITY_IAM` supplied by the (gitignored) `samconfig.toml`; the stale "5 tables, 3 Lambdas, SNS topic" resource list was corrected to 1 table / 2 Lambdas / 1 HTTP API / 1 EventBridge rule (Verify by: template.yaml read line by line).
+- [ ] 9D.5 `sam deploy` run by the developer (Verify by: stack `clean-air-planner` in CREATE_COMPLETE and three outputs printed)
+- [ ] 9D.6 `setWebhook` with `secret_token` + `allowed_updates`, then `getWebhookInfo` shows the URL and `pending_update_count: 0` (Verify by: curl output)
+- [ ] 9D.7 Phone test on the deployed bot: `/start` → location → reading; `/status`; `/stop` (Verify by: replies on a real phone)
+- [ ] 9D.8 `aws lambda invoke` on the scheduler sends exactly one alert, the second invoke sends none (Verify by: `alertsSent: 1` then `alertsSent: 0`)
+- [ ] 9D.9 Public-readiness: `https://t.me/VayuAQI_bot` works from a second Telegram account, BotFather description/about/commands set, $5 budget alarm active (Verify by: friend's phone + Budgets console)
+- [ ] 9D.10 Git commit: `phase-9d: deployable bot (sam build fixed, committed key removed)`
+
+**Phase 9D gate:** a stranger with only the link can `/start`, get their own neighbourhood reading, and receive the automatic ORANGE/RED alert — with the laptop shut.
+
+---
+
 ## Definition of Done (PRD §15)
 
-- [ ] Backend deployed with `sam deploy`; EventBridge schedule producing readings
-- [ ] AQI/tier/advisory logic unit-tested
-- [ ] Email alert received once per tier rise, with English and Hindi text
-- [ ] Dashboard live on a public Amplify URL and works on mobile
-- [ ] Simulate button demonstrates the whole flow in under a minute
-- [ ] README with architecture diagram, AWS service explanations and future scope
+> Scope note: after the Phase 9R redirect the product is the Telegram bot only, so the
+> email, dashboard and Amplify lines below are REMOVED scope, not pending work.
+
+- [ ] Backend deployed with `sam deploy`; EventBridge schedule producing readings (→ 9D.5)
+- [x] AQI/tier/advisory logic unit-tested (124 tests, 10 files, `npm run typecheck` clean)
+- [~] Email alert received once per tier rise, with English and Hindi text — REMOVED in 9R.10; replaced by the Telegram alert (once per rise, deduped)
+- [~] Dashboard live on a public Amplify URL and works on mobile — REMOVED in 9R.10; the bot IS the product
+- [~] Simulate button demonstrates the whole flow in under a minute — replaced by `aws lambda invoke` on the scheduler (9D.8) and the no-deploy `scripts/tg-local.ts --fanout`
+- [x] README with architecture diagram, AWS service explanations and future scope
 - [ ] 3-minute demo video recorded
-- [ ] No secrets committed; billing alarm active
+- [ ] No secrets committed; billing alarm active — a committed OpenAQ key was found and removed (9D.3), history still contains it so the key must be rotated; billing alarm still missing (0.2)

@@ -91,7 +91,7 @@ backend/
   scripts/
     preview-bot.ts        prints the whole chat with no deploy
     validate-template.mjs template.yaml check for machines without the SAM CLI
-  src/tests/            vitest, 141 tests, every AWS/OpenAQ/Telegram call mocked
+  src/tests/            vitest, 124 tests, every AWS/OpenAQ/Telegram call mocked
 docs/TELEGRAM_BOT.md    deploy + setWebhook runbook and test checklist
 ```
 
@@ -125,8 +125,8 @@ Deploy and connect Telegram: see **`docs/TELEGRAM_BOT.md`**. Short version — c
 ```bash
 cp .env.example .env           # then edit it
 set -a; source .env; set +a    # nothing loads .env by itself; this exports it
-sam build
-sam deploy --parameter-overrides \
+npm run build                  # = sam build (npm puts esbuild on PATH for SAM)
+sam.cmd deploy --parameter-overrides \
   OpenAQApiKey="$OPENAQ_API_KEY" \
   TelegramBotToken="$TELEGRAM_BOT_TOKEN" \
   TelegramWebhookSecret="$TELEGRAM_WEBHOOK_SECRET"
@@ -135,6 +135,12 @@ sam deploy --parameter-overrides \
 curl "https://api.telegram.org/bot<TOKEN>/setWebhook" \
   -d "url=<WebhookUrl from the deploy output>" -d "secret_token=<SECRET>"
 ```
+
+On Windows Git Bash use `sam.cmd` — a bare `sam` is not found there. The stack
+name, region, `resolve_s3` and `CAPABILITY_IAM` come from `samconfig.toml`,
+which is **gitignored on purpose**: `sam deploy --guided` writes parameter
+*values* into it in plaintext, so secrets are passed on the command line from
+`.env` instead.
 
 Then `/start` on a phone. To see an alert without waiting for bad air, invoke
 the scheduler by hand:
