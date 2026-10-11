@@ -34,11 +34,9 @@ PM2.5 105 µg/m³, measured 06:00 UTC
 Station: Ghaziabad - DPCC
 
 What to do:
-Avoid heavy outdoor exertion — running, cycling, outdoor workouts. Keep windows
-closed on busy roads and wear an N95 mask outdoors if you can.
+Avoid heavy outdoor exertion — running, cycling, outdoor workouts. Keep windows closed on busy roads and wear an N95 mask outdoors if you can.
 
-Advisories are guidance based on hourly PM2.5 estimates and do not replace
-official orders from local authorities.
+Advisories are guidance based on hourly PM2.5 estimates and do not replace official orders from local authorities.
 ```
 
 `/status` replies in the same shape, on demand. To print this whole conversation
