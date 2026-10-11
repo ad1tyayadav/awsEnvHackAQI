@@ -61,7 +61,7 @@ graph TD
 | **EventBridge** | 30-minute schedule, no servers |
 | **OpenAQ v3** | Nearest PM2.5 station within 25 km |
 | **AWS SAM** | One `template.yaml` = the whole backend as code |
-| **CloudWatch** | Logs for every decision (school-free, secrets never logged) |
+| **CloudWatch** | Logs for every decision (secrets never logged) |
 
 Two cost-saving design choices worth pointing at:
 
@@ -104,12 +104,20 @@ npm test                       # 141 tests, no AWS and no network needed
 npx tsx scripts/preview-bot.ts # read the exact chat the bot produces
 ```
 
-Deploy and connect Telegram: see **`docs/TELEGRAM_BOT.md`**. Short version:
+Deploy and connect Telegram: see **`docs/TELEGRAM_BOT.md`**. Short version — copy
+`.env.example` to `.env` and fill in the three values first (`OPENAQ_API_KEY`,
+`TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`):
 
 ```bash
+cp .env.example .env           # then edit it
+set -a; source .env; set +a    # nothing loads .env by itself; this exports it
 sam build
-sam deploy --guided            # stack clean-air-planner, region ap-south-1
-                               # parameters: OpenAQApiKey, TelegramBotToken, TelegramWebhookSecret
+sam deploy --parameter-overrides \
+  OpenAQApiKey="$OPENAQ_API_KEY" \
+  TelegramBotToken="$TELEGRAM_BOT_TOKEN" \
+  TelegramWebhookSecret="$TELEGRAM_WEBHOOK_SECRET"
+
+# then register the webhook (details in docs/TELEGRAM_BOT.md)
 curl "https://api.telegram.org/bot<TOKEN>/setWebhook" \
   -d "url=<WebhookUrl from the deploy output>" -d "secret_token=<SECRET>"
 ```

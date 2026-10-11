@@ -62,7 +62,17 @@ When prompted for parameters:
 | `Stage` | `prod` (default) |
 
 Both Telegram values are `NoEcho`, so they never appear in deploy output or logs.
-The same values can be supplied non-interactively:
+The same values can be supplied non-interactively. Keep them in `.env` (copy the
+tracked `.env.example` first) rather than retyping them:
+
+```bash
+cp .env.example .env           # then fill in the three values
+set -a; source .env; set +a    # exports them for the shell
+```
+
+Nothing reads `.env` automatically — there is no dotenv in the project, so it is
+a safe notepad plus the source for the command below. Never put AWS access keys
+in it; the AWS CLI uses `aws configure` / `aws sso login`.
 
 ```bash
 sam deploy --parameter-overrides \

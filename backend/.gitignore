@@ -1,6 +1,7 @@
 node_modules/
 .aws-sam/
 .env*
+!.env.example
 dist/
 out/
 __tests__/
