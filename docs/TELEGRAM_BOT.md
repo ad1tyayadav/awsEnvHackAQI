@@ -1,92 +1,177 @@
-# Telegram Bot — design doc
+# Telegram bot — setup and test runbook
 
-Status: PLANNED (documentation only, awaiting approval; no code yet).
-Source docs consulted (Oct 2026):
-- Bot API reference: https://core.telegram.org/bots/api (webhook + secret_token, Update/Message/Location objects, sendMessage limits, error format `{ok:false, error_code, description}`)
-- Bot features / deep links: https://core.telegram.org/bots/features (start payload up to 64 chars, A-Z a-z 0-9 _ -)
-- Bots FAQ (limits): https://core.telegram.org/bots/faq (≈30 msg/s broadcast, 1 msg/s per chat, 20 msg/min per group)
+The product is **just this bot**. A person sends `/start`, taps **share my
+location** once, and is done. From then on:
 
-## Bot setup (human, @BotFather)
-
-1. `/newbot` → choose name + username → copy the **bot token** (never commit).
-2. Generate a random **webhook secret** (256 chars max, chars A-Z a-z 0-9 _ -).
-3. Both go into SAM as NoEcho params `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`.
-4. Set the webhook once the API is deployed:
-   `curl "https://api.telegram.org/bot<TOKEN>/setWebhook" -d "url=https://<api>/telegram/webhook" -d "secret_token=<WEBHOOK_SECRET>" -d 'allowed_updates=["message","callback_query","my_chat_member"]'`
-   - `my_chat_member` is required to detect **blocked bot** (private-chat member status change).
-   - For local dev: `deleteWebhook` first (webhook and getUpdates are mutually exclusive).
-
-## Commands and flows
-
-| Command | Behaviour |
+| What | When |
 |---|---|
-| `/start` | Welcome + language choice via inline keyboard (English / हिंदी). With deep-link payload `school_<schoolId>`, registers a **school-follower** for that school. Idempotent: re-running updates, not duplicates. |
-| language buttons (callback_query) | Save `lang`, then ask for location via the Telegram **location request button** (reply keyboard) or "send your city name". |
-| location message | Save `lat/lng`, rounded to create `locKey` (grouping key); confirm + show /status. |
-| city name text | Geocode-lite: instead of a maps API, match against a small built-in city list or use the rounded coordinate the user shares. Clear error if unmatched. |
-| `/status` | Fetch nearest PM2.5 for the subscriber's location (or linked school), compute AQI/tier with the existing pure functions, reply with the cached advisory in their language + the rule block. |
-| `/language` | Show the language buttons again. |
-| `/stop` | Mark subscriber inactive (stop alerts). `/start` re-activates. |
-| any other text | Q&A path (AI layer, Phase 11): rule-based status + optional AI tip. Before Phase 11 it replies with the rule-based status. |
+| **Automatic alert** | The scheduler runs every 30 minutes. If the air for your ~2 km area escalated into **ORANGE or RED**, you get a message. Once per rise, never repeated. |
+| `/status` | Current AQI, tier, station and the action plan, on demand |
+| `/stop` | Stop the automatic alerts. Sending a location again (or `/start`) starts them again. |
 
-### Deep link for schools
+English only. Alerts fire on ORANGE and RED by decision.
 
-`https://t.me/<BotUsername>?start=school_<schoolId>` — payload ≤ 64 chars, safe alphabet; school IDs already match (e.g. `sch_1728..._ab12cd` fits). The dashboard shows this link per school (Phase 12 button).
+Docs used while building (Oct 2026, not from memory):
+- Bot API reference <https://core.telegram.org/bots/api> — `setWebhook` (`secret_token`, `allowed_updates`), `sendMessage`, the `{ok, error_code, description, parameters.retry_after}` envelope
+- Bot features <https://core.telegram.org/bots/features> — deep links, commands
+- Bots FAQ <https://core.telegram.org/bots/faq> — ~30 msg/s overall, ~1 msg/s per chat
 
-## Subscriber types
+---
 
-**Citizen-first: a citizen needs NOTHING else after step 3.**
+## 1. Create the bot (one-time, you)
 
-- `citizen` (the default and main use): own lat/lng, alerts for the rounded location. One-time onboarding = /start → language → location. After that the bot is fully self-serve: automatic ORANGE/RED alerts every 30-minute cycle, /status, /language, /stop, Q&A and /explain — all in chat, no dashboard, no email, no account.
-- `school-follower` (optional layer): linked `schoolId` via deep link, alerts whenever that school alerts (same tier-rise dedupe). A parent can ALSO be a citizen — the types are not exclusive for alerting; each subscription tracks its own `lastAlertTier`.
+1. In Telegram, message **@BotFather** → `/newbot` → name + username (e.g. `CleanAirAlertsBot`).
+2. Copy the **token** (`123456:AA...`). Never commit it, never paste it into a chat.
+3. Make a random **webhook secret** (1–256 chars from `A-Z a-z 0-9 _ -`):
 
-## Data model (SubscribersTable, PK chatId)
+   ```bash
+   openssl rand -hex 32
+   ```
 
-`type ("citizen"|"school-follower"), lang, lat, lng, locKey, schoolId, lastAlertTier, blocked (bool), active (bool), createdAt, updatedAt`
+---
 
-## Alert fan-out (Phase 10) — citizen-first monitoring
+## 2. Deploy (this is what gives Telegram a public HTTPS URL)
 
-The scheduled job monitors BOTH kinds of location:
-1. **Citizen groups:** read all ACTIVE citizen subscribers, group by `locKey` (~2 km rounding), fetch OpenAQ ONCE per group, evaluate with the shared pipeline, then send each citizen their alert (their language, dedupe via their `lastAlertTier`). This is how someone who only ever pressed /start gets automatic alerts.
-2. **Schools:** exactly as today (email via SNS) plus Telegram to `school-follower` subscribers grouped by `schoolId`, dedupe per subscriber with `shouldAlert(sub.lastAlertTier, tier)`.
+Telegram cannot reach `localhost`, so the webhook needs a deployed endpoint.
+Everything is in `backend/template.yaml`.
 
-For every alert: per-subscriber `lastAlertTier` update, guided by the existing `shouldAlert` rule; email path unchanged.
+```bash
+cd backend
+npm test                      # should be green before you deploy anything
+sam build
+sam deploy --guided           # stack: clean-air-planner, region: ap-south-1
+```
 
-## Message texts (draft; developer reviews before build)
+When prompted for parameters:
 
-English welcome: "👋 I watch the air for YOUR area. Share your location once and I'll alert you whenever it turns bad. Choose your language:"
-Hindi: "👋 मैं आपके इलाक़े की हवा पर नज़र रखता हूँ। एक बार लोकेशन भेजें — फिर जब भी हवा ख़राब होगी, मैं आपको यहीं बता दूँगा। अपनी भाषा चुनें:"
-Status footer (both languages): guidance-only disclaimer (same wording as the dashboard/email).
-
-## Security
-
-- Every webhook request: compare header `X-Telegram-Bot-Api-Secret-Token` with the secret; mismatch → 403, nothing processed.
-- Handler always returns HTTP 200 quickly (Telegram retries non-2xx and would duplicate sends); errors are logged, work is idempotent where possible.
-- chatId is the identity; no phone numbers or contacts are stored.
-
-## Error handling
-
-| Case | Handling |
+| Parameter | Value |
 |---|---|
-| User blocks bot (`my_chat_member` → `kicked`) | mark `blocked = true`, stop sending; un-unblocks re-activate on next message |
-| 403 Forbidden on sendMessage | same as above (belt and braces) |
-| 429 Too Many Requests | respect `parameters.retry_after`, pace fan-out (≈1 msg/s per chat, chunked globally) |
-| Message > 4096 chars | split into sequential sendMessage calls at the limit |
-| Invalid/unmatched location or no nearby station | clear bilingual error, suggest city list or retry |
-| Telegram 5xx/network | log, return 200, rely on dedupe to prevent double alerts |
+| `OpenAQApiKey` | your OpenAQ key (NoEcho — never logged) |
+| `TelegramBotToken` | the BotFather token |
+| `TelegramWebhookSecret` | the random string from step 1.3 |
+| `Stage` | `prod` (default) |
 
-## Rate limits (from Bots FAQ)
+Both Telegram values are `NoEcho`, so they never appear in deploy output or logs.
+The same values can be supplied non-interactively:
 
-- Broadcast ≈ 30 messages/second overall, ~1 message/second per chat, 20/minute per group.
-- Alert volume is naturally low (≤1 alert per subscriber per tier rise) but the fan-out loop still sleeps/chunks.
+```bash
+sam deploy --parameter-overrides \
+  OpenAQApiKey="$OPENAQ_KEY" \
+  TelegramBotToken="$TELEGRAM_BOT_TOKEN" \
+  TelegramWebhookSecret="$TELEGRAM_WEBHOOK_SECRET"
+```
 
-## Manual test checklist
+Copy the **`ApiBaseUrl`** from the deploy output — you need it next. Resources
+this creates: 5 DynamoDB tables (pay-per-request), 3 Lambdas, 1 HTTP API, 1 SNS
+topic, 1 EventBridge schedule. Nothing bills hourly.
 
-1. setWebhook with wrong secret → send a /start from a phone → no reply; CloudWatch log shows 403.
-2. Correct secret, empty chat → /start → welcome + 2 language buttons (test both).
-3. Share location → /status shows AQI + tier + plan in chosen language.
-4. Send a city name ("Delhi") → same as above; gibberish city → friendly error.
-5. `/start school_<realId>` from the dashboard link → alerts arrive for that school; simulate RED → bot alert received once (dedupe: simulate again → no second alert).
-6. `/language` switches language; `/stop` stops alerts; blocked-bot case: block the bot, run a simulate RED → no error loop, subscriber marked blocked.
-7. Long advisory text (>4096 chars is unlikely, but force with a debug flag) → arrives split into two messages.
-8. Rate-limit guard: simulate 40 subscribers in localdb.json → fan-out completes, sends paced, none silently dropped.
+---
+
+## 3. Point Telegram at your Lambda
+
+```bash
+API=https://<api-id>.execute-api.ap-south-1.amazonaws.com/prod
+TOKEN=<bot token>
+SECRET=<webhook secret>
+
+curl "https://api.telegram.org/bot$TOKEN/setWebhook" \
+  -d "url=$API/telegram/webhook" \
+  -d "secret_token=$SECRET" \
+  -d 'allowed_updates=["message","my_chat_member"]'
+```
+
+- `secret_token` makes Telegram send the header `X-Telegram-Bot-Api-Secret-Token`
+  on every request; the Lambda rejects anything else with **403**.
+- `allowed_updates` keeps the noise down: messages (commands, locations) plus
+  `my_chat_member` so a block/unblock is visible.
+
+Verify:
+
+```bash
+curl "https://api.telegram.org/bot$TOKEN/getWebhookInfo"
+```
+
+Expect `url` = your endpoint and `pending_update_count` at or near 0. If
+`last_error_message` shows a 403, the secret in `setWebhook` and the secret in
+the Lambda disagree — re-run `setWebhook`.
+
+---
+
+## 4. Test on a real phone
+
+1. Open your bot, send `/start`.
+   → Welcome text + a **📍 Share my location** button.
+2. Tap the button and share the location.
+   → "✅ Saved…" plus the **current reading** (AQI, tier, station, action plan)
+     if a station is within 25 km.
+   → Send `/start` again first if you want to check idempotency: you get the
+     short welcome-back text and **no duplicate row**.
+3. Send `/status` → the same reading on demand, recomputed.
+4. Send `/stop` → "🔕 Alerts stopped."
+5. Send anything else (`hello`) or `/help` → the command menu.
+
+### Making the automatic alert fire on demand
+
+You do not have to wait for the 30-minute schedule, and you do not have to hope
+the air is bad. Run the scheduler by hand:
+
+```bash
+aws lambda invoke --region ap-south-1 \
+  --function-name cleanair-fetch-evaluate-prod \
+  --payload '{}' /dev/stdout
+```
+
+The response contains a `citizens` block:
+
+```json
+{"evaluated":0,"ok":0,"failed":0,
+ "citizens":{"groups":1,"openAqFetches":1,"subscribers":1,
+             "alertsSent":1,"blocked":0,"sendFailures":0}}
+```
+
+`alertsSent: 1` means your phone got an alert. Run it again immediately:
+`alertsSent: 0` — that is the de-duplication working, because you have already
+been told about this tier. Delete or change the subscriber's `lastAlertTier` in
+`cleanair-subscribers-prod` if you want to see it fire again.
+
+If `skippedGroups: 1` and nothing arrives, the station nearby was unreadable —
+try `/start` with a location in a city with heavy sensor coverage (Delhi,
+Mumbai, Bengaluru).
+
+---
+
+## 5. Local development (no deploy)
+
+There is no local webhook: Telegram only calls HTTPS. Two options:
+
+```bash
+# Option A - stop Telegram from calling the deployed webhook, then poll yourself
+curl "https://api.telegram.org/bot$TOKEN/deleteWebhook"
+```
+
+```bash
+# Option B - tunnel a local server and point setWebhook at the tunnel URL
+# (ngrok, cloudflared, ...). Ports Telegram accepts: 443, 80, 88, 8443.
+```
+
+Either way the bot's own logic is fully unit-tested (`npm test` — no AWS, no
+network, no Telegram), so the fast loop is the test suite, not the phone.
+
+---
+
+## What a subscriber row looks like
+
+Table `cleanair-subscribers-<Stage>`, partition key `chatId` (string):
+
+| Field | Meaning |
+|---|---|
+| `chatId` | the Telegram chat — the only identity we keep |
+| `lat` / `lng` | the shared location |
+| `locKey` | `lat,lng` snapped to a ~2 km grid; everyone in a cell shares one OpenAQ lookup |
+| `active` | false after `/stop` |
+| `blocked` | true once Telegram returns 403 (user blocked the bot) |
+| `lastAlertTier` | the last tier we alerted them about (de-duplication) |
+| `firstName` | for friendlier logs |
+| `createdAt` / `updatedAt` | bookkeeping |
+
+No phone numbers, no contacts, no message history.
