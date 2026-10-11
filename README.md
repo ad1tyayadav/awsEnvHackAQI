@@ -146,9 +146,16 @@ Then `/start` on a phone. To see an alert without waiting for bad air, invoke
 the scheduler by hand:
 
 ```bash
-aws lambda invoke --region ap-south-1 --function-name cleanair-fetch-evaluate-prod \
-  --payload '{}' /dev/stdout
+aws lambda invoke --profile mgmt --region ap-south-1 --function-name cleanair-fetch-evaluate-prod \
+  --payload '{}' --cli-binary-format raw-in-base64-out out.json >/dev/null
+cat out.json; rm -f out.json
 ```
+
+(`/dev/stdout` as the output file does not work on Windows — the AWS CLI cannot
+open it. Writing a temp file and deleting it does.)
+
+Deploy with the `mgmt` profile: the other profile on this machine is refused by
+an organisation SCP, so `sam deploy` there fails immediately.
 
 ## Cost
 

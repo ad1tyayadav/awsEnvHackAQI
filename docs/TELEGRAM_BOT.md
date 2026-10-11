@@ -214,14 +214,19 @@ the air is bad. Run the scheduler by hand:
 ```bash
 aws lambda invoke --profile mgmt --region ap-south-1 \
   --function-name cleanair-fetch-evaluate-prod \
-  --payload '{}' /dev/stdout
+  --payload '{}' --cli-binary-format raw-in-base64-out out.json >/dev/null
+cat out.json; rm -f out.json
 ```
 
-The response contains a `citizens` block:
+Write to a file and `cat` it, as above. The tidier-looking `... --payload '{}'
+/dev/stdout` **does not work on Windows**: the AWS CLI is a Windows program, so
+it cannot open Git Bash's `/dev/stdout` and fails with `[Errno 2] No such file or
+directory: '/dev/stdout'` (verified on this machine).
+
+The response is a single `citizens` block — this is a real run:
 
 ```json
-{"evaluated":0,"ok":0,"failed":0,
- "citizens":{"groups":1,"openAqFetches":1,"subscribers":1,
+{"citizens":{"groups":1,"openAqFetches":1,"skippedGroups":0,"subscribers":1,
              "alertsSent":1,"blocked":0,"sendFailures":0}}
 ```
 
@@ -229,6 +234,16 @@ The response contains a `citizens` block:
 `alertsSent: 0` — that is the de-duplication working, because you have already
 been told about this tier. Delete or change the subscriber's `lastAlertTier` in
 `cleanair-subscribers-prod` if you want to see it fire again.
+
+Read the other numbers when something looks wrong:
+
+| Field | Meaning |
+|---|---|
+| `groups` | neighbourhoods (≈2 km cells) with at least one subscriber |
+| `openAqFetches` | OpenAQ calls actually made — **one per group**, not per person |
+| `skippedGroups` | groups whose station was unreadable this cycle; look for `fanout group fetch failed` in the logs. `HTTP 429` means OpenAQ's rate limit — normal if you have just run several checks by hand; wait a minute and retry |
+| `sendFailures` | Telegram refused the message; the tier is deliberately **not** recorded, so the next run retries it |
+| `blocked` | the user blocked the bot, so they are marked and never retried |
 
 If `skippedGroups: 1` and nothing arrives, the station nearby was unreadable —
 try `/start` with a location in a city with heavy sensor coverage (Delhi,
