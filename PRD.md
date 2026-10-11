@@ -26,7 +26,7 @@ On high-pollution days, Indian schools usually find out too late. Principals don
 - Fully automatic: scheduled fetch, rule-based advisory, alert on bad days
 - Deployed on AWS with a public URL
 - One reliable demo path: add school, see AQI, simulate severe day, receive alert
-- **Telegram bot (P0)**: schools AND any person can register and get bad-AQI alerts directly in chat, free
+- **Telegram bot (P0) — CITIZEN-FIRST**: the bot is the main product for ANY person. One `/start` + shared location (once) is the entire onboarding; from then on everything happens in chat: automatic bad-AQI alerts on ORANGE/RED rises, /status, /language, /stop, Q&A and /explain — no dashboard, no email, no account needed. Schools remain an optional layer on top (email alerts + deep-link followers), not the centre of the bot experience.
 - **AI layer (P1, Hugging Face)**: audience-specific wording and ask-the-bot Q&A with graceful rule-based fallback. RULES DECIDE, AI EXPLAINS: the AQI value, tier and alert decision always come from the existing rule-based code; the approved rule-based action plan is always included in every message; the AI only adds a personalised tip or answers a question; every AI feature still works with rule-based text when AI is unavailable.
 
 **Non-goals (do NOT build unless every phase is done)**
@@ -38,17 +38,22 @@ On high-pollution days, Indian schools usually find out too late. Principals don
 
 ## 4. Core demo flow
 
-1. Open dashboard, add a school (name, city, lat/lng, parent/principal emails).
+**A. Citizen flow (THE primary story — no dashboard needed):**
+1. On a phone, open the bot, press **/start**, pick English or Hindi, share location **once**. That is the ENTIRE onboarding.
+2. From then on everything happens in Telegram: the area is monitored every 30 minutes automatically, an alert arrives when the tier rises to ORANGE/RED (with the bilingual action plan), /status answers any time — no dashboard visit, no email, no account ever needed.
+3. Ask the bot a question ("Can I go for a run now?") — grounded answer under the rule block.
+
+**B. School flow (optional layer):**
+1. Open dashboard, add a school (name, city, lat/lng, parent/principal emails) — or a parent just taps the school's Telegram deep link in chat.
 2. Dashboard shows live AQI, category, risk tier, and the action plan (English/Hindi toggle).
 3. Press **Simulate severe day**.
 4. Status flips to RED, the 24-hour trend updates, and an email **and a Telegram alert** arrive with the plan in English and Hindi.
-5. In Telegram, press **/start**, pick language, share location, get the status; then ask "Can my child play cricket today?" and show the answer.
 
 ## 5. Functional requirements
 
 **P0 (must ship)**
 - F1. Register a school with name, city, lat, lng and contact emails.
-- F2. Scheduled job (every 30 minutes) fetches the nearest air-quality reading for each school and stores it.
+- F2. Scheduled job (every 30 minutes) fetches the nearest air-quality reading for every monitored location — each registered SCHOOL **and each distinct citizen location** (Telegram `locKey`) — and stores it.
 - F3. Convert PM2.5 to an India (CPCB) AQI value and category, and map it to an action tier.
 - F4. Generate an advisory per tier in English and Hindi (Hindi via Amazon Translate, cached).
 - F5. Send an email alert when a school's tier rises to ORANGE or RED. No repeat alert for the same tier.
@@ -58,7 +63,7 @@ On high-pollution days, Indian schools usually find out too late. Principals don
 **P1 (if time remains)**
 - F8. "All clear" email when the tier drops back to GREEN or YELLOW.
 - F10. Optional AI-written friendlier wording via **Hugging Face Inference Providers** (NOT Bedrock), with rule-based text always the fallback. See section 6a.
-- F11. Telegram bot for citizens and school-followers: /start with language choice, share location or send a city, /status, /language, /stop, plus free-text Q&A (F12). Deep-link `t.me/<bot>?start=school_<schoolId>` lets a parent subscribe to one school's alerts; the dashboard shows this link per school. Subscriber types: `citizen` (own location) and `school-follower` (linked to a school). Alerts reuse the existing evaluate-and-alert path and dedupe rule, tracking `lastAlertTier` per subscriber. Email (SNS) remains a parallel,fallback channel. Webhook validates Telegram's secret-token header on every request. Bot token and webhook secret are NoEcho SAM parameters, never committed. Citizen subscribers are grouped by rounded location so OpenAQ is not called once per person. Handled: user blocks bot, invalid location, no nearby station, duplicate /start, Telegram API errors/rate limits, 4096-char message limit.
+- F11. Telegram bot — THE onboarding is one step: `/start` → language choice → share location once. From then on a citizen gets everything in chat. Commands: /status (current AQI, tier and action plan for my location), /language, /stop (unsubscribe), plus free-text Q&A (F12) and /explain (F13). A school can additionally be followed via deep link `t.me/<bot>?start=school_<schoolId>` (dashboard shows the link per school) for a parent. Subscriber types: `citizen` (own location — the default and main use) and `school-follower` (linked to a school). Alerts reuse the existing evaluate-and-alert path and dedupe rule, tracking `lastAlertTier` per subscriber. Email (SNS) remains a parallel, fallback channel for schools. Webhook validates Telegram's secret-token header on every request. Bot token and webhook secret are NoEcho SAM parameters, never committed. Citizen subscribers are grouped by rounded location (`locKey`) so OpenAQ is not called once per person. Handled: user blocks bot, invalid location, no nearby station, duplicate /start, Telegram API errors/rate limits, 4096-char message limit.
 - F12. Telegram "ask the bot" Q&A ("Can my child play cricket today?"), grounded in the user's current AQI, tier and the approved rules. No medical diagnosis; for health concerns, refer to a doctor.
 - F13. Plain-language explanation of what the current AQI category means (AI, with a rule-based standard explanation as fallback).
 
@@ -135,11 +140,12 @@ EventBridge (30 min)
       │
       ▼
 Lambda: fetchAndEvaluate ──► OpenAQ API (free, needs API key)
+      │  ├─ monitor BOTH: registered schools AND distinct citizen locKey groups (Telegram)
       │  ├─ compute AQI + tier (pure functions)
       │  ├─ write reading ──► DynamoDB (Readings)
       │  └─ if tier rises to ORANGE/RED (rule-based dedupe per school / subscriber):
       │        get advisory EN + HI (Translate, cached in DynamoDB)
-      │        publish ──► SNS topic ──► email subscribers
+      │        publish ──► SNS topic ──► email subscribers (schools)
       │        send ──► Telegram Bot API ──► citizen + school-follower subscribers
       ▼
 API Gateway ──► Lambda: api (schools CRUD, status, simulate, school deep link) ──► DynamoDB
@@ -187,7 +193,9 @@ No new AWS service is added for Telegram or the AI layer (SQS fan-out is future 
 `tier, aqi, subject, channel ("email" | "telegram")`
 
 **SubscribersTable** (new, Telegram): PK `chatId` (string)
-`type ("citizen" | "school-follower"), lang ("en" | "hi"), lat, lng (citizen only), schoolId (school-follower only), locKey (rounded location used for grouping), lastAlertTier, blocked (bool), createdAt`
+`type ("citizen" | "school-follower"), lang ("en" | "hi"), lat, lng, locKey (citizen only; locKey = location rounded to ~2 km, the grouping key), schoolId (school-follower only), lastAlertTier, blocked (bool), active (bool), createdAt, updatedAt`
+
+Citizen locations ARE first-class monitored locations: the scheduled job enumerates **distinct citizen `locKey` groups** alongside schools, fetches OpenAQ once per group, evaluates with the shared pipeline, and alerts each citizen in the group per the dedupe rule with per-subscriber `lastAlertTier`.
 
 **TokenStatus table** (new, AI layer): PK `tokenRef` (e.g. `HF_TOKEN_1`)
 `status ("ok" | "exhausted"), exhaustedUntil (epoch seconds), updatedAt` — a token whose quota failed is skipped until `exhaustedUntil` passes.
@@ -468,9 +476,9 @@ Detailed prompts in the **same style as the existing phases** (goal, prompt text
 | Time | Content |
 |---|---|
 | 0:00-0:30 | The problem: a school learns about severe AQI after children are already outside. Who suffers. |
-| 0:30-1:30 | Live demo: add a school, show live AQI and the action plan, toggle to Hindi, press **Simulate severe day**, show the email AND the **Telegram alert** arriving in English and Hindi. Show the bot on the phone: /start → language → share location → status. |
+| 0:30-1:30 | Live demo: on the PHONE open the bot → /start → language → share location → /status. That's the whole onboarding. Then press **Simulate severe day** on the dashboard (for the registered school) and show the email AND the **Telegram alert** arriving in English and Hindi. |
 | 1:20-2:20 | Ask the bot: "Can my child play cricket today?" — grounded AI answer under the rule text. Then simulate HF token-1 failing (bad token env override) and ask again: the answer still arrives via token 2 / rule-based fallback, proving AI is never a dependency. |
-| 2:20-3:00 | Architecture diagram: EventBridge, Lambda, Telegram webhook, DynamoDB, Translate, SNS, Hugging Face fallback chain, API Gateway, Amplify. One sentence per service on what it does. |
+| 2:20-3:00 | Architecture diagram: EventBridge monitoring schools AND citizen locations, Lambda, Telegram webhook, DynamoDB, Translate, SNS, Hugging Face fallback chain, API Gateway, Amplify. One sentence per service on what it does. |
 | 3:00-3:30 | Impact and scale: any school in any city + any citizen with Telegram; future: WhatsApp (needs Meta verification), heatwave alerts, district dashboards. |
 
 Record with the dashboard already loaded, email inbox open in another tab, and the architecture diagram ready.
@@ -500,7 +508,7 @@ Record with the dashboard already loaded, email inbox open in another tab, and t
 - [ ] Email alert received once per tier rise, with English and Hindi text
 - [ ] Dashboard live on a public Amplify URL and works on mobile
 - [ ] Simulate button demonstrates the whole flow in under a minute
-- [ ] **Telegram bot (P0):** citizen + school-follower can register (/start, language, location), get ONE alert per tier rise, /status works in both languages, webhook validates the secret-token header, blocked bots are un-subscribed safely
+- [ ] **Telegram bot (P0, citizen-first):** ANY person registers with ONE /start + one location share and then receives automatic alerts + /status in chat (both languages) with NO dashboard or email; school deep-link followers also work; webhook validates the secret-token header; blocked bots are un-subscribed safely
 - [ ] **AI layer (P1):** Q&A answers arrive under the approved rule block; forcing both HF tokens to fail still gets a rule-based reply (fallback proven on demand); per-user + global rate limits enforced
 - [ ] README with architecture diagram, AWS service explanations and future scope
 - [ ] 3-minute demo video recorded

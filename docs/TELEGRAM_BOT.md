@@ -35,23 +35,27 @@ Source docs consulted (Oct 2026):
 
 ## Subscriber types
 
-- `citizen`: own lat/lng, alerts for the rounded location.
-- `school-follower`: linked `schoolId`, alerts whenever that school alerts (same tier-rise dedupe).
+**Citizen-first: a citizen needs NOTHING else after step 3.**
+
+- `citizen` (the default and main use): own lat/lng, alerts for the rounded location. One-time onboarding = /start → language → location. After that the bot is fully self-serve: automatic ORANGE/RED alerts every 30-minute cycle, /status, /language, /stop, Q&A and /explain — all in chat, no dashboard, no email, no account.
+- `school-follower` (optional layer): linked `schoolId` via deep link, alerts whenever that school alerts (same tier-rise dedupe). A parent can ALSO be a citizen — the types are not exclusive for alerting; each subscription tracks its own `lastAlertTier`.
 
 ## Data model (SubscribersTable, PK chatId)
 
 `type ("citizen"|"school-follower"), lang, lat, lng, locKey, schoolId, lastAlertTier, blocked (bool), active (bool), createdAt, updatedAt`
 
-## Alert fan-out (Phase 10)
+## Alert fan-out (Phase 10) — citizen-first monitoring
 
-Reuses the shared evaluate path. For each alert:
-1. Email via existing SNS publish (unchanged).
-2. Telegram: gather subscribers by `locKey` (citizens) and by `schoolId` (followers); for each, dedupe with `shouldAlert(sub.lastAlertTier, tier)`; send bilingual message (their language), update `lastAlertTier` and `active`.
+The scheduled job monitors BOTH kinds of location:
+1. **Citizen groups:** read all ACTIVE citizen subscribers, group by `locKey` (~2 km rounding), fetch OpenAQ ONCE per group, evaluate with the shared pipeline, then send each citizen their alert (their language, dedupe via their `lastAlertTier`). This is how someone who only ever pressed /start gets automatic alerts.
+2. **Schools:** exactly as today (email via SNS) plus Telegram to `school-follower` subscribers grouped by `schoolId`, dedupe per subscriber with `shouldAlert(sub.lastAlertTier, tier)`.
+
+For every alert: per-subscriber `lastAlertTier` update, guided by the existing `shouldAlert` rule; email path unchanged.
 
 ## Message texts (draft; developer reviews before build)
 
-English welcome: "👋 I report air quality for your area and for schools. Choose your language:"
-Hindi: "👋 मैं आपके इलाक़े और स्कूलों की हवा की जानकारी देता हूँ। अपनी भाषा चुनें:"
+English welcome: "👋 I watch the air for YOUR area. Share your location once and I'll alert you whenever it turns bad. Choose your language:"
+Hindi: "👋 मैं आपके इलाक़े की हवा पर नज़र रखता हूँ। एक बार लोकेशन भेजें — फिर जब भी हवा ख़राब होगी, मैं आपको यहीं बता दूँगा। अपनी भाषा चुनें:"
 Status footer (both languages): guidance-only disclaimer (same wording as the dashboard/email).
 
 ## Security

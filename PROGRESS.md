@@ -164,9 +164,9 @@
 
 ---
 
-## Phase 9 (new, P0): Telegram bot — registration, commands, webhook
+## Phase 9 (new, P0): Telegram bot — citizen-first registration, commands, webhook
 
-**Goal:** Any person or a school follower can register on Telegram, pick a language, share location or send a city, and use /status, /language, /stop.
+**Goal:** ANY person clicks /start, picks a language, shares their location ONCE — and from that moment they are done: everything else (alerts, /status, Q&A, /explain) happens in chat. A school deep link is an optional extra for parents, not the main path.
 
 - [ ] 9.1 Create the bot with @BotFather; get the token and a random webhook secret. NoEcho SAM params `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET` (Verify by: so far only template.yaml edit; `sam validate` passes)
 - [ ] 9.2 Add `telegramWebhook` Lambda + API route `/telegram/webhook`; validate `X-Telegram-Bot-Api-Secret-Token` header, return 403 on mismatch, 200 otherwise (Verify by: unit tests for both header cases; `sam build` passes)
@@ -178,7 +178,7 @@
 - [ ] 9.8 Update res/telegram fixtures; add Telegram deep-link endpoint GET /schools/{id}/telegram returning `{deepLink}` (Verify by: unit test + curl against local server)
 - [ ] 9.9 Git commit: `phase-9: telegram bot registration, commands, webhook` (Verify by: `git log -1`)
 
-**Phase 9 gate:** register on the phone -> language -> location -> /status reply; deep link subscribes a follower to a school; wrong secret token returns 403.
+**Phase 9 gate (citizen-first):** on a phone: /start -> language -> share location -> /status reply — and that is ALL a citizen ever needs to do. Deep link subscribes a follower to a school; wrong secret token returns 403. Re-registering the same chat never duplicates.
 
 ---
 
@@ -203,19 +203,20 @@
 
 ---
 
-## Phase 10 (new, P0): Telegram alert fan-out in the evaluate path
+## Phase 10 (new, P0): Telegram alert fan-out — citizen-first monitoring
 
-**Goal:** On a tier rise, existing evaluate-and-alert code also notifies Telegram subscribers; citizens are grouped by rounded location so OpenAQ is called once per group.
+**Goal:** Citizen locations are FIRST-CLASS: the scheduler monitors registered schools AND distinct citizen locKey groups; on a tier rise every matched subscriber gets a Telegram alert (dedupe per subscriber). OpenAQ is called once per group, not once per person.
 
 - [ ] 10.1 Add SubscribersTable to `template.yaml` (PK chatId) and pass its name as env var to fetchAndEvaluate, api and the new telegramWebhook Lambdas (Verify by: `sam validate` passes)
 - [ ] 10.2 Add `telegram.ts` Bot API client (sendMessage, sendLocation prompt helpers, error mapping incl. 403 blocked-bot, rate-limit backoff, 4096-char split) (Verify by: unit test with mocked fetch passes: normal send, 403 -> mark blocked, 429 -> retry-after)
-- [ ] 10.3 Add `subscribers.ts` data access: upsert citizen (chatId + rounded locKey), upsert school-follower (chatId + schoolId), list by locKey / by schoolId, mark blocked, track lastAlertTier per subscriber (Verify by: unit test with mocked DocumentClient passes)
-- [ ] 10.4 Add `notify.ts` channel-agnostic sender: given {schoolId, tier, aqi, advisoryEn, advisoryHi} publishes email (existing snsApi) AND Telegram messages to matching subscribers; dedupe per subscriber via lastAlertTier (Verify by: unit test with mocked SNS + Telegram passes; email path unchanged when no subscribers)
-- [ ] 10.5 Wire `evaluateSchool` to call notify (Verify by: existing evaluate tests still pass + one new test shows both channels called on ORANGE rise)
-- [ ] 10.6 sam local invoke test: seed localdb.json with two citizen subscribers + one school-follower, simulate RED, confirm both get a Telegram-shaped message logged (Verify by: local invoke output shows two sendMessage payloads)
-- [ ] 10.7 Git commit: `phase-10: telegram fan-out in shared evaluate path` (Verify by: `git log -1`)
+- [ ] 10.3 Add `subscribers.ts` data access: upsert citizen (chatId + rounded locKey), upsert school-follower (chatId + schoolId), list ACTIVE subscribers by locKey / by schoolId, distinct locKey groups, mark blocked/unsubscribe, track lastAlertTier per subscriber (Verify by: unit test with mocked DocumentClient passes)
+- [ ] 10.4 Add `notify.ts` channel-agnostic sender: given {schoolId?, locKey?, tier, aqi, advisoryEn, advisoryHi} publishes email (existing snsApi) for schools AND Telegram messages to matching subscribers; dedupe per subscriber via lastAlertTier (Verify by: unit test with mocked SNS + Telegram passes; email path unchanged when no subscribers)
+- [ ] 10.5 Update the scheduler (`fetchAndEvaluate`): loop = schools ∪ distinct citizen locKeys. For a citizen group: fetch PM2.5 once, evaluate, then `notify` every active citizen with that locKey (each with their own lang and lastAlertTier) (Verify by: unit test — 3 citizens sharing a locKey → exactly 1 OpenAQ fetch, 3 Telegram sends, 3 lastAlertTier updates)
+- [ ] 10.6 Wire `evaluateSchool` to call notify (Verify by: existing evaluate tests still pass + one new test shows both channels called on ORANGE rise)
+- [ ] 10.7 sam local invoke test: seed localdb.json with two citizen subscribers + one school-follower, simulate RED, confirm all three get a Telegram-shaped message logged (Verify by: local invoke output shows three sendMessage payloads)
+- [ ] 10.8 Git commit: `phase-10: citizen-first telegram fan-out in shared evaluate path` (Verify by: `git log -1`)
 
-**Phase 10 gate:** simulate RED sends email AND Telegram alerts, once per subscriber, no OpenAQ call per person beyond the grouped lookup.
+**Phase 10 gate:** a citizen with only Telegram (no dashboard, no email) receives the alert once per tier rise after just /start + location; schools keep working exactly as before.
 
 ---
 
