@@ -49,12 +49,22 @@ finish; every command below was run on this project before being written down.
 ### 2.1 Check the four prerequisites
 
 ```bash
-aws sts get-caller-identity      # prints your account id -> AWS credentials work
-aws configure get region         # ap-south-1
-sam.cmd --version                # SAM CLI, version 1.x
-node -v                          # v20 or newer
+aws sts get-caller-identity --profile mgmt   # -> arn:aws:iam::017731864609:user/hackathon-mgmt
+aws configure get region --profile mgmt      # ap-south-1
+sam.cmd --version                            # SAM CLI, version 1.x
+node -v                                      # v20 or newer
 ```
 
+- **Always pass `--profile mgmt` on this machine.** There are two credential
+  sets in `~/.aws/credentials`, and they are not interchangeable:
+
+  | profile | account | can it deploy? |
+  |---|---|---|
+  | `default` | 701364614914 | **no** — an SCP in the organisation denies CloudFormation, Lambda, DynamoDB, S3 and API Gateway writes, so `sam deploy` fails on its first call |
+  | `mgmt` | 017731864609 (`hackathon-mgmt`, `AdministratorAccess`) | yes — the org's **management account** is exempt from SCPs |
+
+  A bare `sam.cmd deploy` silently picks `default` and dies with `AccessDenied`.
+  Every AWS/SAM command in this runbook therefore carries `--profile mgmt`.
 - **On Windows, call `sam.cmd`, not `sam`.** Git Bash does not do Windows
   `PATHEXT` lookup, so a bare `sam` gives `sam: command not found` even when SAM
   CLI is installed. In PowerShell or `cmd` plain `sam` is fine.
@@ -108,7 +118,7 @@ OpenAQ key. Pass secrets on the command line, not in a config file.
 npm test                # green before you deploy anything
 npm run build           # = sam build; must print "Build Succeeded"
 
-sam.cmd deploy \
+sam.cmd deploy --profile mgmt --region ap-south-1 \
   --parameter-overrides \
     OpenAQApiKey="$OPENAQ_API_KEY" \
     TelegramBotToken="$TELEGRAM_BOT_TOKEN" \
@@ -138,7 +148,7 @@ aws cloudformation describe-stacks --stack-name clean-air-planner \
 
 ```bash
 set -a; source ../.env; set +a
-URL=$(aws cloudformation describe-stacks --stack-name clean-air-planner \
+URL=$(aws cloudformation describe-stacks --stack-name clean-air-planner --profile mgmt \
   --region ap-south-1 --query "Stacks[0].Outputs[?OutputKey=='WebhookUrl'].OutputValue" \
   --output text)
 echo "$URL"   # .../prod/telegram/webhook
@@ -202,7 +212,7 @@ You do not have to wait for the 30-minute schedule, and you do not have to hope
 the air is bad. Run the scheduler by hand:
 
 ```bash
-aws lambda invoke --region ap-south-1 \
+aws lambda invoke --profile mgmt --region ap-south-1 \
   --function-name cleanair-fetch-evaluate-prod \
   --payload '{}' /dev/stdout
 ```
@@ -223,6 +233,31 @@ been told about this tier. Delete or change the subscriber's `lastAlertTier` in
 If `skippedGroups: 1` and nothing arrives, the station nearby was unreadable —
 try `/start` with a location in a city with heavy sensor coverage (Delhi,
 Mumbai, Bengaluru).
+
+### Reading CloudWatch logs from Git Bash
+
+A log group name starts with `/`, and Git Bash rewrites a leading `/` into a
+Windows path, so this fails with `InvalidParameterException: Value at
+'logGroupName' failed to satisfy constraint`:
+
+```bash
+aws logs describe-log-streams --profile mgmt --region ap-south-1 \
+  --log-group-name /aws/lambda/cleanair-fetch-evaluate-prod --output text   # fails
+```
+
+Turn the rewrite off first (in the same shell):
+
+```bash
+export MSYS_NO_PATHCONV=1
+aws logs describe-log-streams --profile mgmt --region ap-south-1 \
+  --log-group-name /aws/lambda/cleanair-fetch-evaluate-prod \
+  --order-by LastEventTime --descending --max-items 1 \
+  --query "logStreams[0].logStreamName" --output text
+```
+
+Both Lambdas log one JSON line per decision (school-free citizen wording):
+`{"msg":"fanout group done","locKey":"28.66,77.46","tier":"ORANGE","aqi":208,"members":1,"alerts":0,"skipped":0}`.
+No secret is ever logged — the values are NoEcho and only lengths are visible.
 
 ---
 
@@ -349,6 +384,58 @@ sam.cmd delete --stack-name clean-air-planner --region ap-south-1
 
 Then delete the SAM-managed artifact bucket (`aws-sam-cli-managed-default-samcli…`)
 if you want the account byte-for-byte as you found it.
+
+---
+
+## 7. What is deployed right now (verified 2026-10-11)
+
+Account **017731864609**, profile `mgmt`, region **ap-south-1**, stack
+`clean-air-planner` = `CREATE_COMPLETE`:
+
+| Resource | Name |
+|---|---|
+| DynamoDB table | `cleanair-subscribers-prod` (PAY_PER_REQUEST, key `chatId`) |
+| Lambda — scheduler | `cleanair-fetch-evaluate-prod` |
+| Lambda — webhook | `cleanair-telegram-webhook-prod` |
+| HTTP API | `kt6cpfvh1j`, stage `prod`, throttling 10 rps / burst 20 |
+| EventBridge rule | `cleanair-fetch-30min-prod`, `rate(30 minutes)`, `ENABLED` |
+| SAM artifact bucket | `aws-sam-cli-managed-default-samclisourcebucket-o2blv6yrdvrm` |
+
+Webhook: `https://kt6cpfvh1j.execute-api.ap-south-1.amazonaws.com/prod/telegram/webhook`
+(`setWebhook` answered `ok: true`, `getWebhookInfo` shows this URL,
+`pending_update_count: 0`). No NAT gateway, EC2 instance, RDS or load balancer
+exists in the account — checked, not assumed.
+
+What was actually run against the deployed stack (not simulated):
+
+| Check | Result |
+|---|---|
+| `npm test` / `npm run typecheck` / `npm run build` | 124 passing / clean / "Build Succeeded" |
+| OpenAQ key as deployed | PM2.5 80 µg/m³, "R K Puram, Delhi - DPCC" |
+| `POST` webhook, no secret / wrong secret | **403** twice + log `{"msg":"telegram webhook rejected","reason":"bad secret"}` |
+| `POST` webhook, correct secret, update with no message | **200** + `{"msg":"telegram update handled","intent":"ignored"...}` |
+| `POST` webhook, correct secret, `/start` from a non-existent chat | **200**, `action: start.welcome.failed` — Telegram's 400 is logged, not a crash |
+| Scheduler invoked by hand, no subscribers | `{"msg":"fanout summary","subscribers":0,"alertsSent":0}` |
+| Scheduler with a **temporary** fixture row in Delhi (deleted afterwards) | `tier YELLOW, aqi 166`, no alert sent, table updated to `lastAlertTier = "YELLOW"` |
+| Scheduler with the fixture moved to ORANGE air (Ghaziabad, deleted afterwards) | `tier ORANGE, aqi 208` → send attempted → Telegram rejected the fake chat → `sendFailures: 1`, and `lastAlertTier` stayed `NULL` so the next run retries |
+| Cleanup | fixture row deleted, `scan` count back to **0**, no temp files left in the repo |
+| Least privilege | each Lambda's only inline policy is SAM's `DynamoDBCrudPolicy` scoped to that one table ARN |
+
+Two caveats found while verifying:
+
+- **Do not trust `aws iam simulate-principal-policy` in this account.** For these
+  roles it reports `explicitDeny` on the very DynamoDB actions the Lambdas
+  demonstrably perform (the org's SCPs are evaluated even though the management
+  account is exempt from them). The inline policy documents and the CloudWatch
+  evidence are the truth.
+- **The runtime warning is real.** CloudWatch prints
+  `NodeVersionSupportWarning: The AWS SDK for JavaScript (v3) versions published
+  after the first week of January 2027 will require node >=22. You are running
+  node v20.20.2.` See §6 — the `nodejs22.x` change clears it.
+
+Still unverified: a message reaching a **real** chat. That needs §4 on your
+phone (`/start` → share location → `/status`), and it is the only way to see
+`alertsSent: 1` turn into an actual Telegram alert.
 
 ---
 
