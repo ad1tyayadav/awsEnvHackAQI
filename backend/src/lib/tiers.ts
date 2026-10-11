@@ -28,13 +28,3 @@ export function shouldAlert(previousTier: Tier | null, newTier: Tier): boolean {
   const prevRank = previousTier ? TIER_RANK[previousTier] : -1;
   return TIER_RANK[newTier] > prevRank;
 }
-
-/** Representative PM2.5 per tier (used by the simulate endpoint). */
-export function tierToRepresentativePm25(tier: Tier): number {
-  switch (tier) {
-    case 'GREEN': return 25;
-    case 'YELLOW': return 80;
-    case 'ORANGE': return 105;
-    case 'RED': return 180;
-  }
-}

@@ -1,6 +1,6 @@
 // Tests for tier boundaries and the alert dedupe rule.
 import { test, expect } from 'vitest';
-import { aqiToTier, shouldAlert, isTier, tierToRepresentativePm25, type Tier } from '../lib/tiers';
+import { aqiToTier, shouldAlert, isTier, type Tier } from '../lib/tiers';
 
 test('aqiToTier boundaries: 0,50,51,100,101,200,201,300,301,500', () => {
   expect(aqiToTier(0)).toBe('GREEN');
@@ -37,11 +37,11 @@ test('shouldAlert transitions (dedupe rule, PRD section 6)', () => {
   }
 });
 
-test('isTier and representative pm25', () => {
+test('isTier accepts exactly the four tiers', () => {
+  expect(isTier('GREEN')).toBe(true);
   expect(isTier('RED')).toBe(true);
   expect(isTier('purple')).toBe(false);
-  expect(tierToRepresentativePm25('RED')).toBeGreaterThan(121);
-  expect(tierToRepresentativePm25('ORANGE')).toBeGreaterThan(91);
+  expect(isTier('')).toBe(false);
 });
 
 test('aqiToTier rejects out-of-range', () => {

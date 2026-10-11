@@ -43,38 +43,6 @@ function hasPm25Sensor(location: unknown): boolean {
   );
 }
 
-/**
- * Fetch the nearest location with a pm25 sensor using the point+radius query:
- *   GET /v3/locations?coordinates=<lat>,<lng>&radius=<m>
- * (coordinates param is latitude,longitude per docs; radius max 25,000 m)
- */
-export async function findNearestPm25Location(
-  lat: number,
-  lng: number,
-  apiKey: string,
-  radiusM = MAX_RADIUS_M,
-  fetchLike: FetchLike = fetch
-): Promise<{ id: number; name: string }> {
-  if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lng) || lng < -180 || lng > 180) {
-    throw new OpenAqError('api_error', `invalid coordinates lat=${lat} lng=${lng}`);
-  }
-
-  const url =
-    `https://api.openaq.org/v3/locations` +
-    `?coordinates=${lat},${lng}&radius=${radiusM}`; // docs: coordinates = lat,lng
-
-  const res = await fetchWithTimeout(url, apiKey, fetchLike);
-  if (!res.ok) throw new OpenAqError('api_error', `locations query HTTP ${res.status}`);
-
-  const body = (await res.json()) as { results?: unknown[] };
-  const results = Array.isArray(body.results) ? body.results : [];
-  const station = results.find(hasPm25Sensor);
-
-  if (!station) throw new OpenAqError('no_station', 'no station with a pm25 sensor within radius');
-  const s = station as { id: number; name: string };
-  return { id: s.id, name: s.name };
-}
-
 /** GET /v3/sensors/{id} — the sensor record embeds `latest` (datetime, value). */
 export async function fetchSensorLatest(
   sensorId: number,
@@ -179,22 +147,16 @@ export async function fetchSensorRecentHour(
   return { value: r.value, utc };
 }
 
-/** Freshness check that returns instead of throwing, for the probe loop. */
+/**
+ * The freshness test used on the live path: true when a reading is recent enough
+ * to act on. It returns instead of throwing so the probe loop can move on to the
+ * next station. The window is 96 hours (STALE_MS), not 3: live-verified against
+ * OpenAQ, many Indian CPCB/DPCC sensors report 1-3 days late, so a tight window
+ * rejects every Delhi station. Tighten STALE_MS if the upstream feeds recover.
+ */
 export function checkFreshOk(measuredAtUtc: string, now = Date.now()): boolean {
   const t = new Date(measuredAtUtc).getTime();
   return Number.isFinite(t) && now - t <= STALE_MS;
-}
-
-export const STALE_THRESHOLD_MS = STALE_MS;
-
-/** Reject readings older than 4 days (96h). PRD said 3h, but live-verified 2026-10-10:
- *  many Indian CPCB/DPCC sensors in OpenAQ report 1-3 days late; 3h.rejects every Delhi
- *  station. Hourly PM2.5 is the unit of decision, so 96h keeps the real-data demo alive.
- *  Tighten back if/when upstream feeds recover. */
-export function checkFreshness(_pm25: number, measuredAtUtc: string, now = Date.now()): void {
-  const t = new Date(measuredAtUtc).getTime();
-  if (!Number.isFinite(t)) throw new OpenAqError('stale_data', 'unparseable measurement time');
-  if (now - t > STALE_MS) throw new OpenAqError('stale_data', `measurement is older than 96 hours (${measuredAtUtc})`);
 }
 
 async function fetchWithTimeout(url: string, apiKey: string, fetchLike: FetchLike): Promise<Response> {

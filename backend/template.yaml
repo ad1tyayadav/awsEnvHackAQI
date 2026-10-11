@@ -1,10 +1,10 @@
-# Clean Air Telegram bot - SAM template (Phase 9R: citizen-only scope).
+# VayuAQI - the whole backend in one SAM template.
 # Creates: 1 DynamoDB table (subscribers), 2 Lambdas (the 30-minute scheduler and
-# the Telegram webhook), 1 HTTP API for the webhook route, 1 EventBridge rule.
-# No schools, no dashboard, no email, no SNS, no Translate: deleted in task 9R.10.
+# the Telegram webhook), 1 HTTP API for the webhook route, 1 EventBridge rule,
+# plus the IAM roles SAM generates for the two functions.
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: Clean Air Telegram bot - automatic air-quality alerts for citizens (AWS Bharat Build, Track 01 Air)
+Description: VayuAQI - automatic air-quality alerts on Telegram (AWS Bharat Build, Track 01 Air)
 
 Parameters:
   OpenAQApiKey:

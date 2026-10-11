@@ -34,8 +34,8 @@ PM2.5 105 µg/m³, measured 06:00 UTC
 Station: Ghaziabad - DPCC
 
 What to do:
-Cancel outdoor sports and assemblies. Keep classroom windows closed. Bus children
-and outdoor-duty staff should wear N95 masks. Keep children with asthma indoors.
+Avoid heavy outdoor exertion — running, cycling, outdoor workouts. Keep windows
+closed on busy roads and wear an N95 mask outdoors if you can.
 
 Advisories are guidance based on hourly PM2.5 estimates and do not replace
 official orders from local authorities.
@@ -86,7 +86,7 @@ graph TD
 | **Node.js 20** runtime, **ES2022** output | Matches the Lambda runtime; code is bundled, no dependency shipping. |
 | **AWS SDK v3** (`client-dynamodb`, `lib-dynamodb`) | DynamoDB access from both Lambdas; no ORM. |
 | **esbuild** (through SAM) | Bundles each handler to a ~1.3 MB `index.js`; this is the `Metadata: BuildMethod: esbuild` in the template. |
-| **Vitest** | **124 tests**, no AWS, no network: AQI maths, tier boundaries, de-duplication, the conversation flows, the fan-out, the webhook secret gate. AWS, OpenAQ and Telegram are mocked at the edge, never mocked away. |
+| **Vitest** | **119 tests**, no AWS, no network: AQI maths, tier boundaries, de-duplication, the conversation flows, the fan-out, the webhook secret gate. AWS, OpenAQ and Telegram are mocked at the edge, never mocked away. |
 | **tsx** | Runs the offline preview and the no-deploy local bot runner. |
 | **GitHub** | Source of truth; the deploy is reproducible from the template alone. |
 
@@ -128,7 +128,7 @@ backend/
     preview-bot.ts        prints every message the bot sends, fully offline
     tg-local.ts           live bot without deploying (long polling)
     validate-template.mjs structure check for machines without the SAM CLI
-  src/tests/            vitest, 124 tests, everything external mocked
+  src/tests/            vitest, 119 tests, everything external mocked
 ```
 
 ## Run it
@@ -136,7 +136,7 @@ backend/
 ```bash
 cd backend
 npm install
-npm test                        # 124 tests, no AWS and no network needed
+npm test                        # 119 tests, no AWS and no network needed
 npm run typecheck               # tsc --noEmit, strict
 npx tsx scripts/preview-bot.ts  # read the exact chat the bot produces
 ```
@@ -340,10 +340,9 @@ can be capped with `aws logs put-retention-policy`. Tear down with
   advisories state that they are guidance and do not replace official orders.
 - **Some Indian sensors report 1–3 days late**, so the bot picks the freshest
   nearby station and refuses readings it considers stale.
-- **The action-plan wording is still the school-oriented text from the original
-  brief** ("cancel outdoor sports and assemblies"). The product became a general
-  citizen bot, so a citizen-facing copy pass is pending; the tiers, thresholds and
-  de-duplication are unaffected.
+- **Advisories are generic guidance, not personal medical advice.** They tell
+  sensitive groups to limit exertion and everyone else what to avoid; they never
+  diagnose. A test asserts the wording stays in that register.
 - **`nodejs20.x` is deprecated** (AWS blocks new functions on it from Feb 2027).
   The fix is one word — `nodejs22.x` in `template.yaml` — and the source already
   targets ES2022.

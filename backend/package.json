@@ -9,9 +9,9 @@
     "build": "sam build"
   },
   "devDependencies": {
-    "@types/aws-lambda": "^8.10.145",
     "@types/node": "^22.10.0",
     "esbuild": "^0.24.0",
+    "js-yaml": "^4.1.0",
     "tsx": "^4.23.15",
     "typescript": "^5.7.0",
     "vitest": "^2.1.8"

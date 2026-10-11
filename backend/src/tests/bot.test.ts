@@ -272,7 +272,7 @@ test('/status reports AQI, tier, station and the action plan for the saved locat
   expect(text).toContain('PM2.5 105');
   expect(text).toContain('06:00 UTC');
   expect(text).toContain('DPCC Anand Vihar');
-  expect(text).toContain('Cancel outdoor sports and assemblies.');
+  expect(text).toContain('Avoid heavy outdoor exertion');
   expect(text).toContain('do not replace official orders');
 });
 
@@ -414,5 +414,5 @@ test('formatAirReport handles a RED reading', () => {
   expect(text).toContain('AQI 346');
   expect(text).toContain('RED');
   expect(text).toContain('18:30 UTC');
-  expect(text).toContain('All outdoor activity stopped.');
+  expect(text).toContain('Stay indoors with windows closed');
 });

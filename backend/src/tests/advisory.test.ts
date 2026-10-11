@@ -1,13 +1,23 @@
-// Tests that each tier returns the PRD English text and invalid tiers throw.
+// Tests the citizen-facing action plan per tier, and that invalid tiers throw.
 import { test, expect } from 'vitest';
 import { getAdvisoryText, DISCLAIMER } from '../lib/advisory';
 import type { Tier } from '../lib/tiers';
 
-test('each tier returns its English advisory text', () => {
-  expect(getAdvisoryText('GREEN')).toBe('Normal activities. No restrictions.');
+const ALL: Tier[] = ['GREEN', 'YELLOW', 'ORANGE', 'RED'];
+
+test('each tier returns its advisory text', () => {
+  expect(getAdvisoryText('GREEN')).toBe('Air is clean. Normal outdoor activity is fine.');
   expect(getAdvisoryText('YELLOW')).toMatch(/asthma/);
-  expect(getAdvisoryText('ORANGE')).toMatch(/Cancel outdoor sports/);
-  expect(getAdvisoryText('RED')).toMatch(/All outdoor activity stopped/);
+  expect(getAdvisoryText('ORANGE')).toMatch(/N95 mask/);
+  expect(getAdvisoryText('RED')).toMatch(/Stay indoors/);
+});
+
+test('every advisory is citizen wording, not the old school wording', () => {
+  // This product is a public air-alert bot: no school instructions, and nothing
+  // that reads as medical advice.
+  for (const tier of ALL) {
+    expect(getAdvisoryText(tier), tier).not.toMatch(/school|classroom|\bPE\b|students|children/i);
+  }
 });
 
 test('invalid tier throws', () => {

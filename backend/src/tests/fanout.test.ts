@@ -187,7 +187,7 @@ test('the alert text carries the tier, the reading and the action plan', async (
   expect(text).toContain('PM2.5 180');
   expect(text).toContain('DPCC Anand Vihar');
   expect(text).toContain('06:00 UTC');
-  expect(text).toContain('All outdoor activity stopped.');
+  expect(text).toContain('Stay indoors with windows closed');
   expect(text).toContain('do not replace official orders');
 });
 

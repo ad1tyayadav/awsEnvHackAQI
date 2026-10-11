@@ -18,7 +18,7 @@ vi.mock('@aws-sdk/lib-dynamodb', async (importOriginal) => {
 // import AFTER the mock is installed so subscribers.ts picks up the fake client
 const {
   locKeyFor, groupByLocKey, upsertCitizen, getSubscriber,
-  listActiveCitizens, groupActiveCitizensByLocKey,
+  listActiveCitizens,
   setLastAlertTier, setActive, markBlocked, LOC_KEY_PRECISION,
 } = await import('../lib/subscribers');
 
@@ -126,21 +126,6 @@ test('listActiveCitizens follows pagination so nobody is silently skipped', asyn
   expect(subs.map((s) => s.chatId)).toEqual(['1', '2']);
   expect(sendMock).toHaveBeenCalledTimes(2);
   expect(cmd(1).input.ExclusiveStartKey).toEqual({ chatId: '1' });
-});
-
-test('groupActiveCitizensByLocKey turns a scan into one bucket per neighbourhood', async () => {
-  sendMock.mockResolvedValue({
-    Items: [
-      { chatId: '1', locKey: 'a' },
-      { chatId: '2', locKey: 'a' },
-      { chatId: '3', locKey: 'b' },
-    ],
-  });
-
-  const groups = await groupActiveCitizensByLocKey();
-
-  expect(groups.size).toBe(2);
-  expect(groups.get('a')!.map((s) => s.chatId)).toEqual(['1', '2']);
 });
 
 test('setLastAlertTier records the tier for de-duplication', async () => {

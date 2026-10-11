@@ -1,13 +1,16 @@
-// English action plan per tier (exact wording from PRD section 6). Pure function.
+// Plain-language action plan per tier, written for a member of the public.
+// Pure function: no AWS, no network. The wording is deliberately non-medical —
+// sensitive groups are told to limit exertion and anything health-related is
+// left to a doctor or an official advisory.
 import type { Tier } from './tiers';
 
 const ADVISORY_EN: Record<Tier, string> = {
-  GREEN: 'Normal activities. No restrictions.',
+  GREEN: 'Air is clean. Normal outdoor activity is fine.',
   YELLOW:
-    'Children with asthma or breathing problems should avoid heavy exercise outdoors. Shorten outdoor PE and keep water available.',
+    'Most people can carry on as usual. If you have asthma, a heart or lung condition, or you are pregnant, limit long or heavy outdoor exertion.',
   ORANGE:
-    'Cancel outdoor sports and assemblies. Keep classroom windows closed. Bus children and outdoor-duty staff should wear N95 masks. Keep children with asthma indoors.',
-  RED: 'All outdoor activity stopped. Keep everyone indoors with windows closed. N95 masks for travel to and from school. Parents are advised to keep children at home if possible. Follow any official order from the local education authority.',
+    'Avoid heavy outdoor exertion — running, cycling, outdoor workouts. Keep windows closed on busy roads and wear an N95 mask outdoors if you can.',
+  RED: 'Stay indoors with windows closed and avoid outdoor exertion. Wear an N95 mask if you must travel. Follow any official advisory from your local authority.',
 };
 
 export function getAdvisoryText(tier: Tier): string {

@@ -143,11 +143,6 @@ export async function listActiveCitizens(): Promise<Subscriber[]> {
   return out;
 }
 
-/** Active subscribers grouped by location cell: one OpenAQ call per group. */
-export async function groupActiveCitizensByLocKey(): Promise<Map<string, Subscriber[]>> {
-  return groupByLocKey(await listActiveCitizens());
-}
-
 /** Remembers the last tier we alerted this chat about (de-duplication). */
 export async function setLastAlertTier(chatId: string, tier: string | null): Promise<void> {
   await doc.send(

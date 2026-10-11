@@ -1,10 +1,8 @@
 import { test, expect, beforeEach, afterEach } from 'vitest';
 import {
   fetchNearestPM25,
-  findNearestPm25Location,
   fetchSensorLatest,
-  OpenAqError,
-  checkFreshness,
+  checkFreshOk,
   type FetchLike,
 } from '../lib/openaq';
 
@@ -23,52 +21,6 @@ const fetchMock = (fn: (url: string, init?: RequestInit) => Promise<Response>): 
   (url, init) => { lastUrl = url; return fn(url, init); };
 
 const KEY = 'test-key';
-
-// --- findNearestPm25Location: success -------------------------------------
-test('findNearestPm25Location returns first pm25-station with correct URL', async () => {
-  const f = fetchMock(async (url) => {
-    expect(url).toContain('coordinates=28.6,77.2');
-    expect(url).toContain('radius=25000');
-    return jsonResponse(200, {
-      results: [
-        { id: 99, name: 'no pm25 here', sensors: [{ parameter: { name: 'pm10' } }] },
-        { id: 1, name: 'Anand Vihar', sensors: [{ parameter: { name: 'pm25' } }] },
-      ],
-    });
-  });
-  const st = await findNearestPm25Location(28.6, 77.2, KEY, 25000, f);
-  expect(st).toEqual({ id: 1, name: 'Anand Vihar' });
-});
-
-test('findNearestPm25Location throws no_station when no pm25 sensor', async () => {
-  const f = fetchMock(async () =>
-    jsonResponse(200, { results: [{ id: 2, name: 'x', sensors: [{ parameter: { name: 'no2' } }] }] })
-  );
-  await expect(findNearestPm25Location(28.6, 77.2, KEY, 25000, f)).rejects.toMatchObject({
-    reason: 'no_station',
-  });
-});
-
-test('findNearestPm25Location throws api_error on 401', async () => {
-  const f = fetchMock(async () => jsonResponse(401, { detail: 'bad key' }));
-  await expect(findNearestPm25Location(28.6, 77.2, KEY, 25000, f)).rejects.toMatchObject({
-    reason: 'api_error',
-  });
-});
-
-test('findNearestPm25Location throws timeout when fetch times out', async () => {
-  const f: FetchLike = () => {
-    const e = Object.assign(new Error('aborted'), { name: 'TimeoutError' });
-    return Promise.reject(e);
-  };
-  await expect(findNearestPm25Location(28.6, 77.2, KEY, 25000, f)).rejects.toMatchObject({
-    reason: 'timeout',
-  });
-});
-
-test('findNearestPm25Location rejects invalid coordinates', async () => {
-  await expect(findNearestPm25Location(999, 77.2, KEY, 25000)).rejects.toThrow(/invalid coordinates/);
-});
 
 // --- fetchSensorLatest: shape handling -------------------------------------
 test('fetchSensorLatest parses latest value', async () => {
@@ -143,8 +95,30 @@ test('fetchNearestPM25 throws stale_data when reading older than 96h', async () 
   await expect(fetchNearestPM25(28.6, 77.2, KEY, f)).rejects.toMatchObject({ reason: 'stale_data' });
 });
 
-// --- freshness helper --------------------------------------------------------
-test('checkFreshness rejects unparseable timestamps', () => {
-  expect(() => checkFreshness(20, 'not-a-date')).toThrow(OpenAqError);
-  expect(() => checkFreshness(20, new Date(Date.now() - 1000).toISOString())).not.toThrow();
+test('fetchNearestPM25 throws no_station when no nearby station has a pm25 sensor', async () => {
+  const f = fetchMock(async () =>
+    jsonResponse(200, { results: [{ id: 2, name: 'x', sensors: [{ parameter: { name: 'no2' } }] }] })
+  );
+
+  await expect(fetchNearestPM25(28.6, 77.2, KEY, f)).rejects.toMatchObject({ reason: 'no_station' });
+});
+
+test('fetchNearestPM25 throws api_error when the locations query is rejected', async () => {
+  const f = fetchMock(async () => jsonResponse(401, { detail: 'bad key' }));
+
+  await expect(fetchNearestPM25(28.6, 77.2, KEY, f)).rejects.toMatchObject({ reason: 'api_error' });
+});
+
+test('fetchNearestPM25 throws timeout when the network stalls', async () => {
+  const f: FetchLike = () =>
+    Promise.reject(Object.assign(new Error('aborted'), { name: 'TimeoutError' }));
+
+  await expect(fetchNearestPM25(28.6, 77.2, KEY, f)).rejects.toMatchObject({ reason: 'timeout' });
+});
+
+// --- freshness helper (the live path: it returns, it does not throw) ---------
+test('checkFreshOk accepts a recent reading and rejects old or unparseable ones', () => {
+  expect(checkFreshOk(new Date(Date.now() - 10 * 60 * 1000).toISOString())).toBe(true);
+  expect(checkFreshOk(new Date(Date.now() - 100 * 60 * 60 * 1000).toISOString())).toBe(false);
+  expect(checkFreshOk('not-a-date')).toBe(false);
 });

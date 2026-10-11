@@ -1,6 +1,6 @@
 // Parser tests (task 9.3) using Update fixtures shaped like the Bot API's.
 import { test, expect } from 'vitest';
-import { parseUpdate, parseStartPayload, COMMANDS, type TgUpdate } from '../lib/telegram';
+import { parseUpdate, COMMANDS, type TgUpdate } from '../lib/telegram';
 
 const CHAT = { id: 123456789, type: 'private' };
 
@@ -9,33 +9,12 @@ const msg = (over: Partial<import('../lib/telegram').TgMessage>): TgUpdate => ({
   message: { message_id: 10, chat: CHAT, from: { id: 123456789, first_name: 'Asha' }, ...over },
 });
 
-test('/start with no payload', () => {
+test('/start signs a chat up, and any argument after it is ignored', () => {
+  // There are no deep links any more: the bot only needs a shared location, so
+  // extra words after /start are never interpreted as a payload.
   expect(parseUpdate(msg({ text: '/start' }))).toEqual({ kind: 'start', chatId: CHAT.id });
-});
-
-test('/start with a deep-link payload keeps the raw payload, uninterpreted', () => {
-  // The school deep link is gone with the school surface; a payload is now only
-  // carried through, never turned into a subscription.
-  expect(parseUpdate(msg({ text: '/start myref_123' }))).toEqual({
-    kind: 'start',
-    chatId: CHAT.id,
-    payload: 'myref_123',
-  });
-});
-
-test('/start drops a payload with bad chars or over 64 chars, but still starts', () => {
-  // Telegram deep-link payloads are a single token: only the first word counts.
-  expect(parseUpdate(msg({ text: '/start bad!chr' }))).toEqual({ kind: 'start', chatId: CHAT.id });
-  const long = 'a'.repeat(65);
-  expect(parseUpdate(msg({ text: `/start ${long}` }))).toEqual({ kind: 'start', chatId: CHAT.id });
-  // Extra words after a valid payload are ignored, not treated as the payload.
-  expect(parseStartPayload('ref extra')).toEqual({ payload: 'ref' });
-});
-
-test('an empty or invalid payload falls back to a plain start', () => {
-  expect(parseStartPayload('')).toEqual({});
-  expect(parseStartPayload(undefined)).toEqual({});
-  expect(parseStartPayload('bad!chr')).toEqual({});
+  expect(parseUpdate(msg({ text: '/start morning_run' }))).toEqual({ kind: 'start', chatId: CHAT.id });
+  expect(parseUpdate(msg({ text: '/start@CleanAirBot' }))).toEqual({ kind: 'start', chatId: CHAT.id });
 });
 
 test('location message becomes a location intent and carries the first name', () => {

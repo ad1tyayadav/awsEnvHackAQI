@@ -83,12 +83,16 @@ for (const fn of ['FetchAndEvaluateFunction', 'TelegramWebhookFunction']) {
   must(typeof envOf(fn).SUBSCRIBERS_TABLE === 'string' && envOf(fn).SUBSCRIBERS_TABLE.includes('SubscribersTable'), `${fn} must get SUBSCRIBERS_TABLE`);
 }
 
-// --- What must be GONE (task 9R.10 removed the school surface) --------------------
-for (const gone of ['SchoolsTable', 'ReadingsTable', 'AdvisoryCacheTable', 'AlertsTable', 'ApiFunction', 'AirAlertsTopic']) {
-  must(!names.includes(gone), `${gone} must be removed with the school surface (task 9R.10)`);
+// --- What must not come back ------------------------------------------------------
+// The product is one Telegram bot. A dashboard's air-quality tables, an email topic
+// or a REST API Lambda would mean deleted scope had crept back into the template.
+const bannedResources = ['SchoolsTable', 'ReadingsTable', 'AdvisoryCacheTable', 'AlertsTable', 'ApiFunction', 'AirAlertsTopic'];
+for (const gone of bannedResources) {
+  must(!names.includes(gone), `${gone} belongs to removed scope and must not come back`);
 }
-for (const banned of ['SCHOOLS_TABLE', 'READINGS_TABLE', 'ADVISORY_TABLE', 'ALERTS_TABLE', 'ALERT_TOPIC_ARN']) {
-  must(!JSON.stringify(res).includes(banned), `stale school env var ${banned} still referenced`);
+const bannedEnvVars = ['SCHOOLS_TABLE', 'READINGS_TABLE', 'ADVISORY_TABLE', 'ALERTS_TABLE', 'ALERT_TOPIC_ARN'];
+for (const banned of bannedEnvVars) {
+  must(!JSON.stringify(res).includes(banned), `stale env var ${banned} still referenced`);
 }
 
 // Global env must carry the new secrets through NoEcho parameters.

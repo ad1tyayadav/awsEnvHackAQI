@@ -2,9 +2,7 @@
 // Pure logic, no network or AWS: turn a raw Bot API Update object into one of
 // our small, typed intents so the webhook handler only has to switch on them.
 // Docs used (Oct 2026): https://core.telegram.org/bots/api (Update, Message,
-// Location, CallbackQuery, BotCommand) and
-// https://core.telegram.org/bots/features (deep-link payload: up to 64 chars,
-// alphabet A-Z a-z 0-9 _ -).
+// Location, CallbackQuery, BotCommand).
 import type { FetchLike } from './openaq';
 
 export interface TgChat {
@@ -41,28 +39,13 @@ export const COMMANDS = ['start', 'status', 'stop', 'help'] as const;
 export type Command = (typeof COMMANDS)[number];
 
 export type Intent =
-  | { kind: 'start'; chatId: number; payload?: string }
+  | { kind: 'start'; chatId: number }
   | { kind: 'command'; chatId: number; command: Command | 'unknown'; args: string[] }
   | { kind: 'location'; chatId: number; lat: number; lng: number; firstName?: string }
   | { kind: 'text'; chatId: number; text: string }
   | { kind: 'ignored'; reason: string };
 
 const BOT_COMMAND_RE = /^\/([A-Za-z0-9_]{1,32})(?:@[A-Za-z0-9_]+)?(?:\s+([\s\S]*))?$/;
-// Deep-link payload alphabet, per the Bot features doc.
-const PAYLOAD_RE = /^[A-Za-z0-9_-]{1,64}$/;
-
-/**
- * `/start` may carry a deep-link payload (`t.me/<bot>?start=<payload>`), which
- * Telegram passes as the first word of the message. Returns it when it matches
- * the documented alphabet, otherwise nothing. Nothing uses a payload today —
- * the school deep link was dropped with the school surface — so this is kept
- * only as validated input rather than interpreted.
- */
-export function parseStartPayload(raw: string | undefined): { payload?: string } {
-  const payload = (raw ?? '').trim().split(/\s+/)[0] ?? '';
-  if (!payload || !PAYLOAD_RE.test(payload)) return {};
-  return { payload };
-}
 
 /**
  * Turns a raw Update into a typed intent. Order matters: the message's location
@@ -96,10 +79,9 @@ export function parseUpdate(update: TgUpdate | undefined | null): Intent {
   if (m) {
     const command = m[1]!.toLowerCase();
     const args = (m[2] ?? '').trim().split(/\s+/).filter(Boolean);
-    if (command === 'start') {
-      const { payload } = parseStartPayload(args[0]);
-      return payload === undefined ? { kind: 'start', chatId } : { kind: 'start', chatId, payload };
-    }
+    // Any argument after /start is ignored on purpose: the bot signs a chat up
+    // with a shared location, so there is nothing for a deep-link payload to do.
+    if (command === 'start') return { kind: 'start', chatId };
     const known = (COMMANDS as readonly string[]).includes(command) ? (command as Command) : 'unknown';
     return { kind: 'command', chatId, command: known, args };
   }
