@@ -12,6 +12,16 @@ Parameters:
   Stage:
     Type: String
     Default: prod
+  TelegramBotToken:
+    Type: String
+    NoEcho: true
+    Description: Telegram bot token from @BotFather (task 9.1)
+    Default: ''
+  TelegramWebhookSecret:
+    Type: String
+    NoEcho: true
+    Description: Random secret sent in X-Telegram-Bot-Api-Secret-Token header (task 9.1)
+    Default: ''
 
 Globals:
   Function:
@@ -24,6 +34,8 @@ Globals:
       Variables:
         STAGE: !Ref Stage
         OPENAQ_API_KEY: !Ref OpenAQApiKey
+        TELEGRAM_BOT_TOKEN: !Ref TelegramBotToken
+        TELEGRAM_WEBHOOK_SECRET: !Ref TelegramWebhookSecret
 
 Resources:
   # DynamoDB tables (PRD section 8)
