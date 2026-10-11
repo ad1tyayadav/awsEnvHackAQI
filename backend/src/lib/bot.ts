@@ -107,15 +107,36 @@ export const TEXTS = {
     '',
     'Send /start and tap 📍 Share my location to begin.',
   ].join('\n'),
+
+  alertHeader: (tier: string, aqi: number) =>
+    `⚠️ Air alert — the air in your area is ${tier} (AQI ${aqi}).`,
 } as const;
+
+/** '2026-10-11T06:00:00Z' -> '06:00 UTC'; falls back to the raw string. */
+function measuredLabel(measuredAt: string): string {
+  return measuredAt.length >= 16 ? `${measuredAt.slice(11, 16)} UTC` : measuredAt;
+}
+
+/** The automatic alert sent when the air turns bad. Pure. */
+export function formatAlert(tier: Tier, aqi: number, reading: Pm25Reading): string {
+  return [
+    TEXTS.alertHeader(tier, aqi),
+    '',
+    `PM2.5 ${reading.pm25} µg/m³, measured ${measuredLabel(reading.measuredAt)}`,
+    `Station: ${reading.stationName}`,
+    '',
+    'What to do:',
+    getAdvisoryText(tier),
+    '',
+    DISCLAIMER,
+  ].join('\n');
+}
 
 /** Nicely formats one reading. Pure. */
 export function formatAirReport(reading: Pm25Reading): string {
   const { aqi, category } = pm25ToAqi(reading.pm25);
   const tier: Tier = aqiToTier(aqi);
-  const measured = reading.measuredAt.length >= 16
-    ? `${reading.measuredAt.slice(11, 16)} UTC`
-    : reading.measuredAt;
+  const measured = measuredLabel(reading.measuredAt);
 
   return [
     `🌫️ Air right now in your area`,
