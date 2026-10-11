@@ -85,7 +85,18 @@ curl "https://api.telegram.org/bot$TOKEN/setWebhook" \
 - `allowed_updates` keeps the noise down: messages (commands, locations) plus
   `my_chat_member` so a block/unblock is visible.
 
-Verify:
+Before deploying, you can validate the template without any AWS credentials:
+
+```bash
+pip install cfn-lint
+cfn-lint --region ap-south-1 --template backend/template.yaml
+```
+
+Expect one warning only (`W2531`, the deprecated `nodejs20.x` runtime) and no
+`E####` errors. `backend/scripts/validate-template.mjs` is the offline stand-in
+that runs without Python; it checks structure, not CloudFormation semantics.
+
+Verify the webhook registration:
 
 ```bash
 curl "https://api.telegram.org/bot$TOKEN/getWebhookInfo"

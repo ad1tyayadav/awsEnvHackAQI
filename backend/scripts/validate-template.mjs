@@ -65,6 +65,18 @@ const route = JSON.stringify(res.TelegramWebhookFunction?.Properties?.Events ?? 
 must(route.includes('/telegram/webhook'), 'telegramWebhook must be routed on POST /telegram/webhook');
 must(route.includes('HttpApi'), 'telegramWebhook route must use the shared HttpApi');
 
+// TypeScript handlers need the esbuild build method, or `sam build` ships
+// index.ts while Handler: index.handler looks for index.js. This is exactly the
+// bug that hid until cfn-lint was run (found after task 9R.11), so check it here.
+for (const fn of ['FetchAndEvaluateFunction', 'TelegramWebhookFunction']) {
+  const meta = res[fn]?.Metadata;
+  must(meta?.BuildMethod === 'esbuild', `${fn} needs Metadata.BuildMethod: esbuild (TypeScript source)`);
+  const entryPoints = meta?.BuildProperties?.EntryPoints ?? [];
+  must(entryPoints.includes('index.ts'), `${fn} BuildProperties.EntryPoints must include index.ts`);
+  // Metadata is a CFN resource attribute: inside Properties it is invalid.
+  must(!('Metadata' in (res[fn]?.Properties ?? {})), `${fn} has Metadata nested inside Properties (must be a sibling)`);
+}
+
 // Neither Lambda may hold table names it does not use: least privilege.
 const envOf = (fn) => res[fn]?.Properties?.Environment?.Variables ?? {};
 for (const fn of ['FetchAndEvaluateFunction', 'TelegramWebhookFunction']) {

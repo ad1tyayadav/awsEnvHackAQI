@@ -66,6 +66,20 @@ Resources:
           SUBSCRIBERS_TABLE: !Ref SubscribersTable
       Policies:
         - DynamoDBCrudPolicy: { TableName: !Ref SubscribersTable }
+    # Required: these are TypeScript sources. Without the esbuild build method
+    # `sam build` would copy index.ts while the handler looks for index.js, and
+    # the Lambda would fail at runtime with "Cannot find module".
+    # Metadata is a resource attribute, so it sits beside Properties, not inside it.
+    # Docs: serverless-sam-cli-using-build-typescript.html
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        EntryPoints:
+          - index.ts
+        Format: cjs
+        Target: es2022
+        Minify: false
+        Sourcemap: false
 
   FetchScheduleRule:
     Type: AWS::Events::Rule
@@ -115,6 +129,15 @@ Resources:
             ApiId: !Ref HttpApi
             Path: /telegram/webhook
             Method: POST
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        EntryPoints:
+          - index.ts
+        Format: cjs
+        Target: es2022
+        Minify: false
+        Sourcemap: false
 
 Outputs:
   ApiBaseUrl:

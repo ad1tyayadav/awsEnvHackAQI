@@ -207,6 +207,15 @@ and they can ask for a reading manually any time. Decisions: **English only** (n
 
 **Phase 9R gate:** on a phone: `/start` -> share location -> `/status` replies with AQI + tier + action plan -> simulate a RED rise -> the bot messages the user automatically, exactly once. Wrong webhook secret returns 403. `/stop` goes quiet, `/start` resumes.
 
+### Deploy-readiness repair found by the real validator (after 9R.11)
+
+`scripts/validate-template.mjs` only checks structure, so it could never catch this: the template had **no `Metadata: BuildMethod: esbuild`** on either function, and both `CodeUri` folders contain only `.ts` files. `sam build` would therefore copy `index.ts` while `Handler: index.handler` looks for `index.js`, and the Lambda would fail at runtime with "Cannot find module". Nothing in the unit tests could see it, and it was never configured in any commit (`git log -S BuildMethod` is empty).
+
+- Fixed: both functions now carry `Metadata: {BuildMethod: esbuild, BuildProperties: {EntryPoints: [index.ts], Format: cjs, Target: es2022, Minify: false, Sourcemap: false}}`. `Metadata` is a CloudFormation *resource attribute*, so it sits beside `Properties` — my first attempt nested it inside `Properties` and `cfn-lint` correctly rejected it (E3002).
+- Verified with the official AWS CloudFormation linter, not just my own script: `cfn-lint --region ap-south-1 --template backend/template.yaml` now reports **no errors** (exit 4 = one warning). Control: AWS's own documented esbuild example lints clean, so the linter is not simply flagging the pattern.
+- Remaining W2531 (warning, not an error): `nodejs20.x` was deprecated 2026-04-30; creation is disabled 2027-02-01. It deploys fine today, so the runtime is left alone — swapping it would be an unverified change since the SAM CLI is unavailable here. One-line fix when wanted: `Runtime: nodejs24.x` in `Globals`.
+- Still not run here: `sam build` / `sam validate` / `sam local invoke` (no SAM CLI on this machine). `cfn-lint` covers template validity; the esbuild build path is the one thing only a real `sam build` can prove.
+
 > Supersedes task 9.8 (deep link) — there are no schools to follow any more.
 
 ---
