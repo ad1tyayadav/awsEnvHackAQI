@@ -5,7 +5,7 @@ import { formatAirReport, handleIntent, TEXTS, type BotDeps } from '../lib/bot';
 import { locKeyFor, type Subscriber } from '../lib/subscribers';
 import { OpenAqError, type Pm25Reading } from '../lib/openaq';
 import { aqiToTier } from '../lib/tiers';
-import type { Intent } from '../lib/telegram';
+import { parseUpdate, type Intent, type TgUpdate } from '../lib/telegram';
 
 /** A station reading shaped like the OpenAQ client's output. */
 const READING: Pm25Reading = {
@@ -221,14 +221,25 @@ test('an unparseable update sends nothing and reports why', async () => {
   expect(sent).toHaveLength(0);
 });
 
-test('a not-yet-implemented intent type stays silent rather than guessing', async () => {
-  const { deps, sent } = fakeDeps();
-  const intent = { kind: 'language', chatId: 555, lang: 'en' } as unknown as Intent;
+test('every update the parser can produce gets an answer — a user is never left staring at silence', async () => {
+  // Drives the real parser into the real handler for each documented entry
+  // point. If a new intent kind is added without a reply, this fails.
+  const { deps, sent } = fakeDeps({ existing: { '555': existingSub('28.62,77.20', 28.6139, 77.209) } });
+  const updates: TgUpdate[] = [
+    { update_id: 1, message: { message_id: 1, chat: { id: 555 }, text: '/start' } },
+    { update_id: 2, message: { message_id: 2, chat: { id: 555 }, text: '/status' } },
+    { update_id: 3, message: { message_id: 3, chat: { id: 555 }, text: '/stop' } },
+    { update_id: 4, message: { message_id: 4, chat: { id: 555 }, text: '/help' } },
+    { update_id: 5, message: { message_id: 5, chat: { id: 555 }, text: '/frobnicate' } },
+    { update_id: 6, message: { message_id: 6, chat: { id: 555 }, text: 'is it safe today?' } },
+    { update_id: 7, message: { message_id: 7, chat: { id: 555 }, location: { latitude: 28.6139, longitude: 77.209 } } },
+  ];
 
-  const outcome = await handleIntent(intent, deps);
-
-  expect(outcome.action).toBe('unhandled:language');
-  expect(sent).toHaveLength(0);
+  for (const update of updates) {
+    const outcome = await handleIntent(parseUpdate(update), deps);
+    expect(outcome.sent, `update ${update.update_id} (${outcome.action})`).toBeGreaterThan(0);
+  }
+  expect(sent).toHaveLength(updates.length);
 });
 
 // ---------------------------------------------------------------------------

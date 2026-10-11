@@ -1,6 +1,6 @@
 // Parser tests (task 9.3) using Update fixtures shaped like the Bot API's.
 import { test, expect } from 'vitest';
-import { parseUpdate, parseStartPayload, parseLangCallback, isLang, type TgUpdate } from '../lib/telegram';
+import { parseUpdate, parseStartPayload, COMMANDS, type TgUpdate } from '../lib/telegram';
 
 const CHAT = { id: 123456789, type: 'private' };
 
@@ -55,12 +55,20 @@ test('a location with no sender name still parses (firstName is optional)', () =
   expect(parseUpdate(update)).toEqual({ kind: 'location', chatId: CHAT.id, lat: 1, lng: 2 });
 });
 
-test('commands parse, with and without @botname suffix', () => {
-  expect(parseUpdate(msg({ text: '/status' }))).toEqual({ kind: 'command', chatId: CHAT.id, command: 'status', args: [] });
-  expect(parseUpdate(msg({ text: '/status@CleanAirBot' }))).toEqual({ kind: 'command', chatId: CHAT.id, command: 'status', args: [] });
-  expect(parseUpdate(msg({ text: '/explain RED' }))).toEqual({ kind: 'command', chatId: CHAT.id, command: 'explain', args: ['RED'] });
-  expect(parseUpdate(msg({ text: '/language' }))).toEqual({ kind: 'command', chatId: CHAT.id, command: 'language', args: [] });
-  expect(parseUpdate(msg({ text: '/stop' }))).toEqual({ kind: 'command', chatId: CHAT.id, command: 'stop', args: [] });
+test('every advertised command parses, with and without the @botname suffix', () => {
+  // `/start` is not in this list on purpose: it has its own intent (it must be
+  // answerable on a chat that has never signed up), so it is covered above.
+  for (const command of COMMANDS.filter((c) => c !== 'start')) {
+    expect(parseUpdate(msg({ text: `/${command}` }))).toEqual({ kind: 'command', chatId: CHAT.id, command, args: [] });
+    expect(parseUpdate(msg({ text: `/${command}@CleanAirBot` }))).toEqual({ kind: 'command', chatId: CHAT.id, command, args: [] });
+  }
+  expect(parseUpdate(msg({ text: '/status now' }))).toEqual({ kind: 'command', chatId: CHAT.id, command: 'status', args: ['now'] });
+});
+
+test('the advertised command list is exactly what the bot answers', () => {
+  // Guards against advertising a command the bot ignores (the BotFather menu is
+  // built from this list). English-only decision: no /language.
+  expect([...COMMANDS]).toEqual(['start', 'status', 'stop', 'help']);
 });
 
 test('unknown command is reported as unknown, not as text', () => {
@@ -69,15 +77,15 @@ test('unknown command is reported as unknown, not as text', () => {
   });
 });
 
-test('language callback buttons (lang:en / lang:hi / bare)', () => {
+test('a button tap from an older bot version is ignored, not answered', () => {
   const cq = (data?: string): TgUpdate => ({
     update_id: 2,
     callback_query: { id: 'cb1', from: { id: CHAT.id }, message: { message_id: 5, chat: CHAT }, data },
   });
-  expect(parseUpdate(cq('lang:en'))).toEqual({ kind: 'language', chatId: CHAT.id, lang: 'en' });
-  expect(parseUpdate(cq('lang:hi'))).toEqual({ kind: 'language', chatId: CHAT.id, lang: 'hi' });
-  expect(parseUpdate(cq('HI'))).toEqual({ kind: 'language', chatId: CHAT.id, lang: 'hi' });
-  expect(parseUpdate(cq('other'))).toEqual({ kind: 'ignored', reason: 'unknown callback data' });
+  const ignored = { kind: 'ignored', reason: 'callback query (this bot has no inline buttons)' };
+  expect(parseUpdate(cq('lang:en'))).toEqual(ignored);
+  expect(parseUpdate(cq('other'))).toEqual(ignored);
+  expect(parseUpdate(cq(undefined))).toEqual(ignored);
 });
 
 test('plain text becomes a text intent (the Q&A path)', () => {
@@ -91,13 +99,7 @@ test('malformed / non-actionable updates are ignored, never thrown', () => {
   expect(parseUpdate(undefined)).toEqual({ kind: 'ignored', reason: 'no update' });
   expect(parseUpdate({ update_id: 3 })).toEqual({ kind: 'ignored', reason: 'no message' });
   expect(parseUpdate(msg({}))).toEqual({ kind: 'ignored', reason: 'non-text, non-location message' });
-  expect(parseUpdate({ update_id: 4, callback_query: { id: 'x' } })).toEqual({ kind: 'ignored', reason: 'callback without chat' });
-});
-
-test('isLang and parseLangCallback helpers', () => {
-  expect(isLang('en')).toBe(true);
-  expect(isLang('hi')).toBe(true);
-  expect(isLang('fr')).toBe(false);
-  expect(parseLangCallback(undefined)).toBeNull();
-  expect(parseLangCallback('lang:fr')).toBeNull();
+  expect(parseUpdate({ update_id: 4, callback_query: { id: 'x' } })).toEqual({
+    kind: 'ignored', reason: 'callback query (this bot has no inline buttons)',
+  });
 });

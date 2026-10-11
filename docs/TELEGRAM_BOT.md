@@ -27,6 +27,16 @@ Docs used while building (Oct 2026, not from memory):
    ```bash
    openssl rand -hex 32
    ```
+4. Same chat, `/setcommands` → pick your bot → paste exactly these four lines, so
+   the command menu users see matches what the bot answers (`COMMANDS` in
+   `src/lib/telegram.ts` — the parser test fails if the two drift apart):
+
+   ```
+   start - Set up alerts for my area
+   status - Air quality in my area right now
+   stop - Stop sending me alerts
+   help - What this bot does
+   ```
 
 ---
 

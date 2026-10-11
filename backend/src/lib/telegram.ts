@@ -7,8 +7,6 @@
 // alphabet A-Z a-z 0-9 _ -).
 import type { FetchLike } from './openaq';
 
-export type Lang = 'en' | 'hi';
-
 export interface TgChat {
   id: number;
   type?: string;
@@ -37,13 +35,14 @@ export interface TgUpdate {
 }
 
 /** Commands the bot understands today (others are reported as `unknown`). */
-export const COMMANDS = ['start', 'status', 'language', 'stop', 'help', 'explain'] as const;
+// Exactly the commands the bot answers. Keep this in step with the @BotFather
+// command menu (docs/TELEGRAM_BOT.md) so users are never shown one it ignores.
+export const COMMANDS = ['start', 'status', 'stop', 'help'] as const;
 export type Command = (typeof COMMANDS)[number];
 
 export type Intent =
   | { kind: 'start'; chatId: number; payload?: string }
   | { kind: 'command'; chatId: number; command: Command | 'unknown'; args: string[] }
-  | { kind: 'language'; chatId: number; lang: Lang }
   | { kind: 'location'; chatId: number; lat: number; lng: number; firstName?: string }
   | { kind: 'text'; chatId: number; text: string }
   | { kind: 'ignored'; reason: string };
@@ -51,10 +50,6 @@ export type Intent =
 const BOT_COMMAND_RE = /^\/([A-Za-z0-9_]{1,32})(?:@[A-Za-z0-9_]+)?(?:\s+([\s\S]*))?$/;
 // Deep-link payload alphabet, per the Bot features doc.
 const PAYLOAD_RE = /^[A-Za-z0-9_-]{1,64}$/;
-
-export function isLang(v: unknown): v is Lang {
-  return v === 'en' || v === 'hi';
-}
 
 /**
  * `/start` may carry a deep-link payload (`t.me/<bot>?start=<payload>`), which
@@ -69,29 +64,18 @@ export function parseStartPayload(raw: string | undefined): { payload?: string }
   return { payload };
 }
 
-/** Language buttons send `lang:en` / `lang:hi`; accept a bare `en` / `hi` too. */
-export function parseLangCallback(data: string | undefined): Lang | null {
-  const d = (data ?? '').trim().toLowerCase();
-  const value = d.startsWith('lang:') ? d.slice('lang:'.length) : d;
-  return isLang(value) ? value : null;
-}
-
 /**
- * Turns a raw Update into a typed intent. Order matters: callback queries
- * (button taps) first, then the message's location, then commands, then
- * plain text. Anything else is ignored rather than thrown, so a malformed
- * update can never crash the webhook.
+ * Turns a raw Update into a typed intent. Order matters: the message's location
+ * first, then commands, then plain text. Anything else is ignored rather than
+ * thrown, so a malformed update can never crash the webhook.
  */
 export function parseUpdate(update: TgUpdate | undefined | null): Intent {
   if (!update || typeof update !== 'object') return { kind: 'ignored', reason: 'no update' };
 
-  const cq = update.callback_query;
-  if (cq) {
-    const chatId = cq.message?.chat?.id;
-    if (typeof chatId !== 'number') return { kind: 'ignored', reason: 'callback without chat' };
-    const lang = parseLangCallback(cq.data);
-    if (lang) return { kind: 'language', chatId, lang };
-    return { kind: 'ignored', reason: 'unknown callback data' };
+  // This bot uses no inline buttons, so a callback query means someone pressed
+  // a button from an older version of the bot. Acknowledge nothing, ignore it.
+  if (update.callback_query) {
+    return { kind: 'ignored', reason: 'callback query (this bot has no inline buttons)' };
   }
 
   const msg = update.message ?? update.edited_message;

@@ -260,9 +260,10 @@ async function handleStatus(chatId: number, deps: BotDeps): Promise<BotOutcome> 
 }
 
 /**
- * Routes one parsed update. Intents that this phase does not handle yet return
- * an `unhandled:` action and send nothing, so the webhook can log them without
- * inventing a reply.
+ * Routes one parsed update. The switch is exhaustive over every intent kind, so
+ * adding a new kind to `Intent` is a compile-time error here rather than a
+ * silent "nothing happens" for the user. `ignored` is the one kind that
+ * deliberately stays quiet: it means the update was unparseable, not a message.
  */
 export async function handleIntent(intent: Intent, deps: BotDeps): Promise<BotOutcome> {
   switch (intent.kind) {
@@ -282,7 +283,5 @@ export async function handleIntent(intent: Intent, deps: BotDeps): Promise<BotOu
       return reply(deps, intent.chatId, TEXTS.help, 'help.text');
     case 'ignored':
       return { action: `ignored:${intent.reason}`, sent: 0, blocked: false };
-    default:
-      return { action: `unhandled:${intent.kind}`, sent: 0, blocked: false };
   }
 }
