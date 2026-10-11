@@ -191,6 +191,21 @@ Resources:
               Action: sns:Publish
               Resource: !Ref AirAlertsTopic
 
+  # Phase 9: Telegram bot webhook. Only the secret-header gate exists today
+  # (task 9.2); subscriber storage is added in Phase 10.
+  TelegramWebhookFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/functions/telegramWebhook/
+      FunctionName: !Sub cleanair-telegram-webhook-${Stage}
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /telegram/webhook
+            Method: POST
+
 Outputs:
   FetchAndEvaluateArn:
     Value: !GetAtt FetchAndEvaluateFunction.Arn
