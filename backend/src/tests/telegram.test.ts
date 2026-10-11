@@ -35,13 +35,21 @@ test('/start school_ with empty id falls back to plain start', () => {
   expect(parseStartPayload('school_')).toEqual({ payload: 'school_' });
 });
 
-test('location message becomes a location intent', () => {
+test('location message becomes a location intent and carries the first name', () => {
   expect(parseUpdate(msg({ location: { latitude: 28.6139, longitude: 77.209 } }))).toEqual({
     kind: 'location',
     chatId: CHAT.id,
     lat: 28.6139,
     lng: 77.209,
+    firstName: 'Asha',
   });
+});
+
+test('a location with no sender name still parses (firstName is optional)', () => {
+  const update = msg({ location: { latitude: 1, longitude: 2 } });
+  delete update.message!.from;
+
+  expect(parseUpdate(update)).toEqual({ kind: 'location', chatId: CHAT.id, lat: 1, lng: 2 });
 });
 
 test('commands parse, with and without @botname suffix', () => {

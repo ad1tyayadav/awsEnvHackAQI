@@ -44,7 +44,7 @@ export type Intent =
   | { kind: 'start'; chatId: number; schoolId?: string; payload?: string }
   | { kind: 'command'; chatId: number; command: Command | 'unknown'; args: string[] }
   | { kind: 'language'; chatId: number; lang: Lang }
-  | { kind: 'location'; chatId: number; lat: number; lng: number }
+  | { kind: 'location'; chatId: number; lat: number; lng: number; firstName?: string }
   | { kind: 'text'; chatId: number; text: string }
   | { kind: 'ignored'; reason: string };
 
@@ -99,7 +99,8 @@ export function parseUpdate(update: TgUpdate | undefined | null): Intent {
 
   const loc = msg.location;
   if (loc && Number.isFinite(loc.latitude) && Number.isFinite(loc.longitude)) {
-    return { kind: 'location', chatId, lat: loc.latitude, lng: loc.longitude };
+    const firstName = typeof msg.from?.first_name === 'string' ? msg.from.first_name : undefined;
+    return { kind: 'location', chatId, lat: loc.latitude, lng: loc.longitude, ...(firstName ? { firstName } : {}) };
   }
 
   const text = typeof msg.text === 'string' ? msg.text.trim() : '';
