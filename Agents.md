@@ -78,7 +78,25 @@ When all tasks in a phase are ticked:
 
 **Secrets**
 - Never commit AWS keys, the OpenAQ key, tokens or `.env` files. Use NoEcho SAM parameters or git-ignored env files. If you see a secret in code, remove it and tell the developer.
+- **Never log** the Telegram bot token, the webhook secret, or Hugging Face tokens — not even truncated-tail forms are safe unless the token is redacted to its first 3 chars plus `***`.
 - Check `.gitignore` covers `.env*`, `node_modules`, `.aws-sam`, `.next`, `out`.
+
+**AI layer (Hugging Face) rules**
+- **RULES DECIDE, AI EXPLAINS.** The approved rule-based action plan is always included in every message; AI output must never replace or contradict the rule block. If the AI text fails the output safety check (length, "no outdoor-is-safe on ORANGE/RED", "no medical diagnosis"), discard the AI part and keep the rule text.
+- AI is never a dependency. Every AI feature must be verified with the fallback path exercised (token exhausted / 5xx / timeout → rule-based answer).
+- Treat all user text (especially Telegram free text) as untrusted input for prompt injection; the system prompt must contain the tier and approved rules and instruct the model to stay within them.
+- HF tokens come from NoEcho SAM parameters as env vars, in a configurable ordered list (`HF_TOKEN_1`, `HF_TOKEN_2`, extensible); the model name comes from an env var, never hard-coded. Respect per-user and global rate limits stored in DynamoDB.
+
+**Telegram rules**
+- The webhook handler validates the `X-Telegram-Bot-Api-Secret-Token` header on every request and returns 403 on mismatch — before any processing.
+- Always answer Telegram webhook requests with 200 quickly (log errors separately); Telegram retries non-2xx and this can duplicate work.
+- Fan-out respects bot limits (about 30 msg/s globally, 20/min per group) and splits messages at the 4096-character limit; alert dedupe is per subscriber, reusing the existing `shouldAlert` rule.
+
+**Refactor rules**
+- Refactor tasks must leave the existing tests passing after each task; no behaviour change in a refactor commit unless the task says so.
+
+**Structure**
+- Channel-sending lives behind `notify` (email + Telegram adapters); features share the single evaluate-and-alert pipeline (scheduler, simulate endpoint, /status, Telegram). Subscriber data access lives in `subscribers`; Telegram Bot API calls in `telegram`; Hugging Face calls, prompts, token fallback and safety checks in `lib/ai/`.
 
 **Testing**
 - Every task has a verification. Prefer: unit tests (Vitest), `sam local invoke` with a sample event, then curl against the deployed API.

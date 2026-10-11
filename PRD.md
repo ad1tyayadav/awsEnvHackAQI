@@ -16,6 +16,7 @@ On high-pollution days, Indian schools usually find out too late. Principals don
 |---|---|
 | **Principal / teacher (primary)** | Know today's risk level and what to do, without reading AQI charts |
 | **Parents** | A short, clear message in English and Hindi |
+| **Citizens** (Telegram bot) | Bad-air alerts for their own location, in chat, free |
 | **Judges (secondary)** | See a working product, AWS used meaningfully, in 3 minutes |
 
 ## 3. Goals and non-goals
@@ -25,19 +26,23 @@ On high-pollution days, Indian schools usually find out too late. Principals don
 - Fully automatic: scheduled fetch, rule-based advisory, alert on bad days
 - Deployed on AWS with a public URL
 - One reliable demo path: add school, see AQI, simulate severe day, receive alert
+- **Telegram bot (P0)**: schools AND any person can register and get bad-AQI alerts directly in chat, free
+- **AI layer (P1, Hugging Face)**: audience-specific wording and ask-the-bot Q&A with graceful rule-based fallback. RULES DECIDE, AI EXPLAINS: the AQI value, tier and alert decision always come from the existing rule-based code; the approved rule-based action plan is always included in every message; the AI only adds a personalised tip or answers a question; every AI feature still works with rule-based text when AI is unavailable.
 
 **Non-goals (do NOT build unless every phase is done)**
 - User login or accounts, maps, mobile app, payments
 - SMS (needs DLT registration in India), voice calls
+- WhatsApp (the official Cloud API needs Meta business verification and paid pre-approved templates; recorded as Future Scope instead)
 - Machine-learning forecasting
-- Bedrock as a dependency (optional extra only)
+- Amazon Bedrock (replaced in the plan by the Hugging Face AI layer; AI is never a dependency)
 
 ## 4. Core demo flow
 
 1. Open dashboard, add a school (name, city, lat/lng, parent/principal emails).
 2. Dashboard shows live AQI, category, risk tier, and the action plan (English/Hindi toggle).
 3. Press **Simulate severe day**.
-4. Status flips to RED, the 24-hour trend updates, and an email arrives with the plan in English and Hindi.
+4. Status flips to RED, the 24-hour trend updates, and an email **and a Telegram alert** arrive with the plan in English and Hindi.
+5. In Telegram, press **/start**, pick language, share location, get the status; then ask "Can my child play cricket today?" and show the answer.
 
 ## 5. Functional requirements
 
@@ -52,8 +57,10 @@ On high-pollution days, Indian schools usually find out too late. Principals don
 
 **P1 (if time remains)**
 - F8. "All clear" email when the tier drops back to GREEN or YELLOW.
-- F9. Telegram bot alert via Lambda.
-- F10. Optional Bedrock-written friendlier wording, with rule-based text as fallback.
+- F10. Optional AI-written friendlier wording via **Hugging Face Inference Providers** (NOT Bedrock), with rule-based text always the fallback. See section 6a.
+- F11. Telegram bot for citizens and school-followers: /start with language choice, share location or send a city, /status, /language, /stop, plus free-text Q&A (F12). Deep-link `t.me/<bot>?start=school_<schoolId>` lets a parent subscribe to one school's alerts; the dashboard shows this link per school. Subscriber types: `citizen` (own location) and `school-follower` (linked to a school). Alerts reuse the existing evaluate-and-alert path and dedupe rule, tracking `lastAlertTier` per subscriber. Email (SNS) remains a parallel,fallback channel. Webhook validates Telegram's secret-token header on every request. Bot token and webhook secret are NoEcho SAM parameters, never committed. Citizen subscribers are grouped by rounded location so OpenAQ is not called once per person. Handled: user blocks bot, invalid location, no nearby station, duplicate /start, Telegram API errors/rate limits, 4096-char message limit.
+- F12. Telegram "ask the bot" Q&A ("Can my child play cricket today?"), grounded in the user's current AQI, tier and the approved rules. No medical diagnosis; for health concerns, refer to a doctor.
+- F13. Plain-language explanation of what the current AQI category means (AI, with a rule-based standard explanation as fallback).
 
 **P2 (future scope, README only)**
 - Heatwave alerts for Track 02 using the same engine, Polly voice alerts, WhatsApp, district-level dashboard for education officers.
@@ -81,6 +88,46 @@ AQI is computed from PM2.5 using CPCB breakpoints with linear interpolation insi
 
 **Alert dedupe:** store `lastAlertTier` on the school. Send an alert only when the new tier is ORANGE or RED and differs from `lastAlertTier` (or is higher). Update `lastAlertTier` on every evaluation.
 
+**Telegram subscriber dedupe:** the same rule applied per subscriber: each subscriber row (citizen or school-follower) stores its own `lastAlertTier`, updated after every evaluation that concerns that subscriber. Telegram alerts additionally respect Telegram Bot API limits (about 30 messages/second globally, 20 messages/minute per group; long texts are split at the 4096-character limit).
+
+## 6a. AI layer (Hugging Face, P1 — never a dependency)
+
+**Core principle: RULES DECIDE, AI EXPLAINS.** The AQI value, the tier and the decision to alert always come from the existing rule-based code (F1-F9, F11). The approved rule-based action plan is ALWAYS included in every message. The AI only adds a personalised tip or answers a question. Every AI feature must keep working, with rule-based text, when AI is unavailable; AI is never a dependency for any alert.
+
+### AI features
+
+1. **Audience-specific advisories** (principal / parent / citizen): generated ONCE per `tier + audience + language` and cached in the AdvisoryCache table (reviewable, near-zero token cost). The model writes English; Hindi comes from Amazon Translate applied to the English output, also cached.
+2. **Telegram "ask the bot" Q&A** (F12): the prompt is grounded in the user's current AQI, tier and the approved rule text. No medical diagnosis; for health concerns the bot tells the user to consult a doctor.
+3. **Plain-language explanation of the current AQI category** (F13): from the cache when available, else a fixed rule-based explanation text.
+
+### Hugging Face client with multi-token fallback
+
+- Two tokens supplied as NoEcho SAM parameters `HF_TOKEN_1`, `HF_TOKEN_2`, stored as Lambda environment variables. Never committed, never logged.
+- Ordered fallback: token 1 → token 2 → rule-based text only. The token list is configurable (env var comma-separated order) so more tokens or a fallback model can be added later.
+- Quota and rate-limit failures (credits exhausted; HTTP 402/429 or whatever the current docs specify), 5xx errors and timeouts are all detected. On a quota failure the token is marked exhausted in DynamoDB with a cooldown/expiry so it is not called again until the cooldown expires, then the next token is tried. Non-quota errors also fall through to the next token, with only a short cooldown.
+- Short timeouts, a small max output length and a retry limit so a Lambda call never hangs.
+- **Two tokens from the SAME Hugging Face account share one monthly quota**, so fallback only helps across DIFFERENT accounts. The demo uses tokens from two accounts.
+- Model: a small, fast instruct model available through Inference Providers, chosen from the current docs at build time (see `docs/AI_LAYER.md`). The model name is an environment variable (`HF_MODEL`), never hard-coded.
+
+### AI safety and abuse protection
+
+- All user text is treated as untrusted (prompt-injection risk). The system prompt contains the current tier and the approved rules and instructs the model to stay within them.
+- Final message = approved rule-based block + AI addition. The AI text must never replace or contradict the rule block. An output check (max length, no claim that outdoor activity is safe on ORANGE/RED days, no medical diagnosis) drops the AI part if it fails.
+- Per-user Q&A rate limit (N questions per hour) and a global daily cap, both stored in DynamoDB. When a limit is reached, the bot replies with the rule-based status and a polite message.
+- The disclaimer "guidance only, official orders take priority" is kept on every AI-assisted message.
+
+**Fallback chain (always ends in a usable answer):**
+
+```
+Question/tip requested
+   → AdvisoryCache (tier+audience+lang hit) → use it
+   → HF token 1 → success → cache + use
+   → HF token 1 quota/5xx/timeout → try HF token 2 (token 1 cooldown on quota)
+   → HF token 2 fails → rule-based text only (never an error, never a hang)
+```
+
+AWS services still used with the AI layer: Lambda, DynamoDB, API Gateway, EventBridge, Amazon Translate, SNS, Amplify Hosting, CloudWatch. The AI layer runs INSIDE the existing Lambdas via HTTPS calls to `router.huggingface.co` — no new AWS service is added.
+
 ## 7. Architecture
 
 ```
@@ -90,13 +137,18 @@ EventBridge (30 min)
 Lambda: fetchAndEvaluate ──► OpenAQ API (free, needs API key)
       │  ├─ compute AQI + tier (pure functions)
       │  ├─ write reading ──► DynamoDB (Readings)
-      │  └─ if tier rises to ORANGE/RED:
+      │  └─ if tier rises to ORANGE/RED (rule-based dedupe per school / subscriber):
       │        get advisory EN + HI (Translate, cached in DynamoDB)
       │        publish ──► SNS topic ──► email subscribers
+      │        send ──► Telegram Bot API ──► citizen + school-follower subscribers
       ▼
-API Gateway ──► Lambda: api (schools CRUD, status, simulate) ──► DynamoDB
+API Gateway ──► Lambda: api (schools CRUD, status, simulate, school deep link) ──► DynamoDB
+API Gateway ──► Lambda: telegramWebhook (validates secret-token header) ──► Telegram Bot API / DynamoDB / (AI Q&A via Hugging Face)
       ▲
-Dashboard (Next.js static export) on Amplify Hosting
+Dashboard (Next.js static export) on Amplify Hosting ──► shows per-school Telegram deep link
+
+Hugging Face Inference Providers (router.huggingface.co): called from Lambdas for audience wording + Q&A,
+with cache → token 1 → token 2 → rule-based fallback (never a dependency)
 
 CloudWatch: logs + AWS Budgets alarm
 ```
@@ -106,28 +158,43 @@ All services in **ap-south-1 (Mumbai)**.
 | Service | Role |
 |---|---|
 | EventBridge | 30-minute schedule |
-| Lambda (Node 20, TypeScript) | All backend logic |
-| DynamoDB (on-demand) | Schools, readings, advisory cache, alert history |
-| Amazon Translate | English to Hindi, cached per tier |
-| SNS | Email alerts (one topic, per-school subscription filter on `schoolId`) |
-| API Gateway (HTTP API) | Dashboard backend |
+| Lambda (Node 20, TypeScript) | All backend logic (scheduler, API, Telegram webhook) |
+| DynamoDB (on-demand) | Schools, readings, advisory cache, alert history, Telegram subscribers, token status, rate-limit counters |
+| Amazon Translate | English to Hindi, cached per tier/audience |
+| SNS | Email alerts (one topic, per-school subscription filter on `schoolId`); fallback channel when Telegram is down |
+| Telegram Bot API | Free chat alerts for citizens and school-followers; webhook + sendMessage |
+| Hugging Face Inference Providers | Audience wording + Q&A via `router.huggingface.co/v1/chat/completions`; token-fallback chain; optional, rule-based fallback always |
+| API Gateway (HTTP API) | Dashboard backend + Telegram webhook (each hook request validated by secret-token header) |
 | Amplify Hosting | Dashboard hosting and public URL |
 | CloudWatch | Logs |
 | AWS SAM | Infrastructure as code, one `template.yaml` |
 
+No new AWS service is added for Telegram or the AI layer (SQS fan-out is future scope only). All three bot flows reuse the SAME evaluate-and-alert code path.
+
 ## 8. Data model (DynamoDB, on-demand)
 
 **SchoolsTable**: PK `schoolId` (string)
-`name, city, lat, lng, contactEmails[], lastAlertTier, createdAt`
+`name, city, lat, lng, contactEmails[], telegramDeepLink (derived), lastAlertTier, createdAt`
 
 **ReadingsTable**: PK `schoolId`, SK `ts` (ISO string)
 `pm25, aqi, category, tier, source ("openaq" | "simulated"), stationName, ttl` (TTL 7 days)
 
-**AdvisoryCacheTable**: PK `key` (`<TIER>#<lang>`, e.g. `RED#hi`)
-`text, updatedAt`
+**AdvisoryCacheTable**: PK `key`
+- existing: `<TIER>#<lang>` (e.g. `RED#hi`) → `text, updatedAt`
+- **added (AI layer): `<TIER>#<audience>#<lang>`** (audience ∈ `principal|parent|citizen`, e.g. `RED#parent#hi`) → `text, updatedAt`
 
 **AlertsTable**: PK `schoolId`, SK `ts`
-`tier, aqi, subject, channel`
+`tier, aqi, subject, channel ("email" | "telegram")`
+
+**SubscribersTable** (new, Telegram): PK `chatId` (string)
+`type ("citizen" | "school-follower"), lang ("en" | "hi"), lat, lng (citizen only), schoolId (school-follower only), locKey (rounded location used for grouping), lastAlertTier, blocked (bool), createdAt`
+
+**TokenStatus table** (new, AI layer): PK `tokenRef` (e.g. `HF_TOKEN_1`)
+`status ("ok" | "exhausted"), exhaustedUntil (epoch seconds), updatedAt` — a token whose quota failed is skipped until `exhaustedUntil` passes.
+
+**RateLimit items** (new, AI layer, stored in TokenStatus table or a dedicated table): PK `scope`
+- `user#<chatId>#<yyyymmddhh>` → `qaCount` (per-user Q&A per hour)
+- `global#<yyyymmdd>` → `dailyCount` (global daily cap)
 
 ## 9. API spec (all JSON, CORS enabled for the dashboard origin)
 
@@ -137,6 +204,8 @@ All services in **ap-south-1 (Mumbai)**.
 | GET | `/schools` | | list of schools with latest tier |
 | GET | `/schools/{id}/status` | | `{school, latest:{pm25,aqi,category,tier,ts,source,stationName}, advisory:{en,hi}, history:[last 24]}` |
 | POST | `/schools/{id}/simulate` | `{tier: "RED"}` or `{pm25: 180}` | runs the full pipeline with a simulated reading; returns the new status |
+| GET | `/schools/{id}/telegram` | | `{ deepLink: "https://t.me/<bot>?start=school_<id>" }` — shown on the dashboard so a parent can subscribe to this school |
+| POST | `/telegram/webhook` | Telegram `Update` JSON | returns 200 quickly; validates the `X-Telegram-Bot-Api-Secret-Token` header first (403 on mismatch). Handled: /start (language inline buttons), share-location / city text, /status, /language, /stop, callback_query answers, free-text Q&A (AI layer). Telegram retries on non-2xx, so the handler always returns 200 and logs errors. |
 
 Validate all inputs (lat in -90..90, lng in -180..180, valid emails, max 5 emails per school). Return clear error messages with proper status codes.
 
@@ -158,23 +227,34 @@ Validate all inputs (lat in -90..90, lng in -180..180, valid emails, max 5 email
 │   ├── samconfig.toml
 │   ├── events/              (sample test events for sam local invoke)
 │   └── src/
-│       ├── lib/             (aqi.ts, tiers.ts, advisory.ts, openaq.ts, db.ts)
+│       ├── lib/             (aqi.ts, tiers.ts, advisory*.ts, openaq.ts, db.ts — pure logic, no AWS calls)
+│       │   ├── evaluate.ts  (shared evaluate-and-alert pipeline used by scheduler, simulate endpoint AND Telegram alerts)
+│       │   ├── notify.ts    (channel-agnostic alert sending: email adapter + Telegram adapter)
+│       │   ├── telegram.ts  (Bot API client, message builders, Update parsing)
+│       │   ├── ai/          (Hugging Face client, token fallback, prompts, output safety checks, rate limits)
+│       │   └── subscribers.ts (Telegram subscriber data access)
 │       ├── functions/
-│       │   ├── fetchAndEvaluate/
-│       │   └── api/
-│       └── tests/
+│       │   ├── fetchAndEvaluate/   (EventBridge scheduler)
+│       │   ├── api/                (dashboard REST API incl. /schools/{id}/telegram deep link)
+│       │   ├── telegramWebhook/    (new: Telegram updates)
+│       │   └── localdev/           (laptop demo server)
+│       └── tests/          (mirrors lib/; all AWS + Telegram + HF mocked)
 ├── frontend/
-└── docs/                    (architecture diagram, screenshots)
+└── docs/                    (TELEGRAM_BOT.md, AI_LAYER.md, architecture, screenshots)
 ```
+
+The Part C restructure in section 12 (refactor prep phase) creates `notify`, `telegram`, `ai`, `subscribers` in `/backend/src/lib` and moves alert publishing behind `notify` without changing behaviour; every refactor task leaves `npm test` green.
 
 ## 11. Cost and security guardrails
 
 - Serverless only. **Never create:** NAT Gateway, EC2, RDS, OpenSearch, load balancers.
 - Set an AWS Budgets alert at $5 on day one.
 - API Gateway throttling (e.g. 10 requests/second, burst 20) to protect credits since the API is public.
-- No AWS keys, API keys or secrets in the repo. The OpenAQ key is passed as a NoEcho SAM parameter at deploy time and stored as a Lambda environment variable. `.env` files are in `.gitignore`.
+- No AWS keys, API keys or secrets in the repo. The OpenAQ key, the Telegram bot token, the Telegram webhook secret and both Hugging Face tokens are passed as NoEcho SAM parameters at deploy time and stored as Lambda environment variables. `.env` files are in `.gitignore`. Tokens are never logged.
 - Lambda IAM permissions scoped to the specific tables, topic and `translate:TranslateText`.
-- Translate each advisory once per tier and language, then read from the cache.
+- Translate each advisory once per tier and language, then read from the cache. AI wording is cached per tier+audience+language (near-zero token cost after warm-up).
+- HF usage guards: short timeouts, small `max_tokens`, retry limit, per-user hourly Q&A limit and a global daily cap in DynamoDB.
+- Telegram: webhook validates its secret-token header on every request; the bot stops alerting a user who blocks it.
 - Tear down with `sam delete` after the hackathon if no longer needed.
 
 ## 12. Build phases and agent prompts
@@ -354,7 +434,8 @@ Amplify Hosting with NEXT_PUBLIC_API_URL set, and verify CORS against the Amplif
 domain. (2) Write README.md: problem, solution, screenshots placeholder,
 architecture diagram (Mermaid), AWS services and why each is used, how to run
 and deploy, cost notes, the honesty note about hourly PM2.5, and a Future Scope
-section (Bedrock-personalized wording, Polly voice alerts, heatwave alerts for
+section (Hugging Face AI layer, WhatsApp bot — needs Meta business verification
+and paid templates so out of scope —, Polly voice alerts, heatwave alerts for
 Track 02, district dashboard). (3) Review the repo for leaked secrets, unused
 code and missing `.gitignore` entries. (4) Create docs/DEMO_SCRIPT.md from PRD
 section 13. Small tasks, one at a time.
@@ -364,20 +445,33 @@ section 13. Small tasks, one at a time.
 
 ---
 
-### Stretch phases (only after Phase 7 is fully done)
+### More phases (Telegram bot + AI layer, inserted after we found Phase 7 is functionally complete)
 
-- **Phase 8: "All clear" email** when the tier drops to GREEN/YELLOW (F8).
-- **Phase 9: Telegram alerts** via a Lambda and bot token stored as an environment variable (F9).
-- **Phase 10: Bedrock wording** behind a feature flag, always falling back to rule-based text (F10).
+**Phase 8: Refactor prep (Part C)** — introduce `notify` (channel-agnostic alerting), `telegram` client skeleton, `subscribers` data access and `/backend/src/lib/ai/` with NO behaviour change; every task leaves tests green. Smallest restructure that works; nothing is moved without a reason in the task list.
+
+**Phase 9: Telegram bot (Part A, P0)** — bot commands (/start with language inline buttons, share location, /status, /language, /stop), citizen + school-follower registration, deep-link subscribe from the dashboard, alert fan-out reusing the shared pipeline and per-subscriber dedupe, webhook secret-token validation, blocked-bot and message-limit handling.
+
+**Phase 10: Telegram alerts in the evaluate path (Part A, P0)** — evaluateSchool fans out via `notify` to email AND Telegram, grouped citizen lookups by rounded location, AlertsTable `channel` extended.
+
+**Phase 11: AI layer (Part B, P1)** — Hugging Face client with HF_TOKEN_1 → HF_TOKEN_2 → rule-based fallback, token-exhaustion DynamoDB cooldown, audience advisories cached per tier+audience+lang, /explain, and Telegram Q&A with prompt-injection guards, output safety check, per-user hourly and global daily caps.
+
+**Phase 12: Dashboard + demo polish** — deep-link button per school on the dashboard, demo script updated (register on the phone, simulate, Telegram alert arrives, ask a question, force token-1 failure to show the fallback), README/risks refresh.
+
+**Post-hackathon future scope (README only):** WhatsApp via the official API (out of scope here: Meta business verification + paid pre-approved templates), SQS fan-out for large-scale Telegram delivery, Polly voice alerts, heatwave Track 02, district dashboard.
+
+---
+
+Detailed prompts in the **same style as the existing phases** (goal, prompt text, "Done when") live in `PROGRESS.md` for the FIRST new phase and get expanded into small tasks on phase start; the phase summaries above are the source of truth for scope and ordering.
 
 ## 13. Demo video script (3 minutes, recorded)
 
 | Time | Content |
 |---|---|
 | 0:00-0:30 | The problem: a school learns about severe AQI after children are already outside. Who suffers. |
-| 0:30-1:30 | Live demo: add a school, show live AQI and the action plan, toggle to Hindi, press **Simulate severe day**, show the email arriving in English and Hindi. |
-| 1:30-2:30 | Architecture diagram: EventBridge, Lambda, DynamoDB, Translate, SNS, API Gateway, Amplify. One sentence per service on what it does. |
-| 2:30-3:00 | Impact and scale: works for any school in any city; next step is heatwave alerts and district dashboards. |
+| 0:30-1:30 | Live demo: add a school, show live AQI and the action plan, toggle to Hindi, press **Simulate severe day**, show the email AND the **Telegram alert** arriving in English and Hindi. Show the bot on the phone: /start → language → share location → status. |
+| 1:20-2:20 | Ask the bot: "Can my child play cricket today?" — grounded AI answer under the rule text. Then simulate HF token-1 failing (bad token env override) and ask again: the answer still arrives via token 2 / rule-based fallback, proving AI is never a dependency. |
+| 2:20-3:00 | Architecture diagram: EventBridge, Lambda, Telegram webhook, DynamoDB, Translate, SNS, Hugging Face fallback chain, API Gateway, Amplify. One sentence per service on what it does. |
+| 3:00-3:30 | Impact and scale: any school in any city + any citizen with Telegram; future: WhatsApp (needs Meta verification), heatwave alerts, district dashboards. |
 
 Record with the dashboard already loaded, email inbox open in another tab, and the architecture diagram ready.
 
@@ -389,7 +483,13 @@ Record with the dashboard already loaded, email inbox open in another tab, and t
 | OpenAQ API key or rate-limit trouble | Cache last reading; use simulate for the demo; keep a small seeded sample dataset |
 | Translate fails or is unavailable | Fall back to English text and log the error |
 | SNS email subscription not confirmed | Show the confirmation note in the UI; confirm your own demo email in advance |
-| Bedrock unavailable on a new account | Not a dependency; rule-based advisory is the product |
+| Bedrock removed from plan — replaced by the HF AI layer | RULES DECIDE, AI EXPLAINS: AI is optional. Every feature answers with rule-based text when AI is off, timed out, quota-exhausted (402/429), or 5xx |
+| Both HF tokens exhausted / rate-limited | DynamoDB cooldown marks tokens exhausted and skips them; long-lived audience texts come from the AdvisoryCache; Q&A falls back to the rule-based status |
+| Prompt injection via Telegram free text | User text is untrusted: system prompt contains the approved rules and instructs the model to stay inside them; output check drops the AI part if it claims outdoor activity is safe on ORANGE/RED or gives medical advice |
+| Telegram user blocks the bot / 403 on send | catch the error, mark the subscriber `blocked`, stop alerting them |
+| Telegram message over 4096 chars | split at the character limit into sequential sendMessage calls |
+| Telegram webhook not from Telegram (forged) | reject requests whose `X-Telegram-Bot-Api-Secret-Token` header does not match (403) |
+| Telegram rate limits (≈30 msg/s, 20/min per group) | fan-out is chunked/paced; alert per subscriber is at most once per tier rise by dedupe |
 | Amplify static export issues | Deploy the exported `out/` folder to S3 + CloudFront instead |
 | Running low on time | Cut stretch phases first, then polish; never cut Phases 1-6 |
 
@@ -400,6 +500,8 @@ Record with the dashboard already loaded, email inbox open in another tab, and t
 - [ ] Email alert received once per tier rise, with English and Hindi text
 - [ ] Dashboard live on a public Amplify URL and works on mobile
 - [ ] Simulate button demonstrates the whole flow in under a minute
+- [ ] **Telegram bot (P0):** citizen + school-follower can register (/start, language, location), get ONE alert per tier rise, /status works in both languages, webhook validates the secret-token header, blocked bots are un-subscribed safely
+- [ ] **AI layer (P1):** Q&A answers arrive under the approved rule block; forcing both HF tokens to fail still gets a rule-based reply (fallback proven on demand); per-user + global rate limits enforced
 - [ ] README with architecture diagram, AWS service explanations and future scope
 - [ ] 3-minute demo video recorded
 - [ ] No secrets committed; billing alarm active

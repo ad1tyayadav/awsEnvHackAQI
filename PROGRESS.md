@@ -155,7 +155,7 @@
 
 ## Phase 8 (Stretch): "All clear" email
 
-**Goal:** Send a recovery email when tier drops back to GREEN or YELLOW.
+**Goal:** Send a recovery email when tier drops back to GREEN or YELLOW. NOTE: Phase 8 and 9 below remain stretch scope; Phase 8 stays open — but the NEW phases (Telegram bot + AI layer) take priority and are ordered after Phase 9 and before Phase 10 (Bedrock wording), which is REPLACED.
 
 - [ ] 8.1 Add `shouldSendAllClear(previousTier, newTier): boolean` to `tiers.ts` — returns true when previous was ORANGE/RED and new is GREEN/YELLOW (Verify by: unit test passes)
 - [ ] 8.2 Add "all clear" email template in `alerts.ts` — subject: "All clear: <School> is now <TIER>", body: good news message in English + Hindi (Verify by: unit test passes)
@@ -164,7 +164,29 @@
 
 ---
 
-## Phase 9 (Stretch): Telegram alerts
+## Phase 9 (new, P0): Telegram bot — registration, commands, webhook
+
+**Goal:** Any person or a school follower can register on Telegram, pick a language, share location or send a city, and use /status, /language, /stop.
+
+- [ ] 9.1 Create the bot with @BotFather; get the token and a random webhook secret. NoEcho SAM params `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET` (Verify by: so far only template.yaml edit; `sam validate` passes)
+- [ ] 9.2 Add `telegramWebhook` Lambda + API route `/telegram/webhook`; validate `X-Telegram-Bot-Api-Secret-Token` header, return 403 on mismatch, 200 otherwise (Verify by: unit tests for both header cases; `sam build` passes)
+- [ ] 9.3 Update parser in `telegram.ts`: extract /start payload (school_<id> deep link), commands, callback_query (language buttons), location message, plain text (Verify by: unit test on sample Update fixtures per current Bot API docs)
+- [ ] 9.4 /start flow: inline language buttons (English/Hindi), location request button, duplicate /start is idempotent (Verify by: unit test)
+- [ ] 9.5 /status: resolve subscriber location (own or school), fetch nearest PM2.5 using existing `fetchNearestPM25` + pure AQI/tier code, reply with cached advisory in chosen language (Verify by: unit test; then `sam local invoke` with a fixture Update JSON)
+- [ ] 9.6 /language switches lang; /stop marks subscriber inactive; invalid location/no nearby station send clear bilingual error texts (Verify by: unit test)
+- [ ] 9.7 setWebhook runbook in docs/TELEGRAM_BOT.md (secret_token param, allowed_updates, deleteWebhook for local dev); live end-to-end test with a real chat (Verify by: register on a phone and receive /status reply)
+- [ ] 9.8 Update res/telegram fixtures; add Telegram deep-link endpoint GET /schools/{id}/telegram returning `{deepLink}` (Verify by: unit test + curl against local server)
+- [ ] 9.9 Git commit: `phase-9: telegram bot registration, commands, webhook` (Verify by: `git log -1`)
+
+**Phase 9 gate:** register on the phone -> language -> location -> /status reply; deep link subscribes a follower to a school; wrong secret token returns 403.
+
+---
+
+## Phase 9 (Stretch → superseded): Telegram alerts (old school-chat-id list)
+
+> Superseded by the new Phase 9 and Phase 10 above (Subscribers table with citizen / school-follower types instead of a single school chat ID). Kept here for history.
+
+**Goal (original):** Send alerts via a Telegram bot in addition to email.
 
 **Goal:** Send alerts via a Telegram bot in addition to email.
 
@@ -175,14 +197,54 @@
 
 ---
 
-## Phase 10 (Stretch): Bedrock wording
+## Phase 10 — REPLACED (was: Bedrock wording)
 
-**Goal:** Optionally use Bedrock to generate friendlier advisory text, with rule-based fallback.
+> Bedrock is REMOVED from the project plan. Replaced by the new Phase 10: Telegram bot alert fan-out and Phase 11 AI layer (Hugging Face) — see the phases added below. F9 now lives in the new Phase 9 (full bot: registration, language, location). The school-only chat-ID list approach is superseded by the Subscribers table with citizen and school-follower types.
 
-- [ ] 10.1 Add a feature flag env var `USE_BEDROCK` (default `false`) to the Lambda (Verify by: `sam validate` passes)
-- [ ] 10.2 Write `src/lib/bedrock.ts` — call Bedrock to rephrase the advisory text in a friendlier tone. On failure, return `null` (Verify by: file compiles)
-- [ ] 10.3 Update `getAdvisory` to try Bedrock when the flag is on, fall back to rule-based text on failure (Verify by: with flag off, behavior is unchanged; with flag on + mock, Bedrock text is used; with flag on + Bedrock failure, falls back to rule-based)
-- [ ] 10.4 Git commit: `phase-10: optional Bedrock advisory wording` (Verify by: `git log -1`)
+---
+
+## Phase 10 (new, P0): Telegram alert fan-out in the evaluate path
+
+**Goal:** On a tier rise, existing evaluate-and-alert code also notifies Telegram subscribers; citizens are grouped by rounded location so OpenAQ is called once per group.
+
+- [ ] 10.1 Add SubscribersTable to `template.yaml` (PK chatId) and pass its name as env var to fetchAndEvaluate, api and the new telegramWebhook Lambdas (Verify by: `sam validate` passes)
+- [ ] 10.2 Add `telegram.ts` Bot API client (sendMessage, sendLocation prompt helpers, error mapping incl. 403 blocked-bot, rate-limit backoff, 4096-char split) (Verify by: unit test with mocked fetch passes: normal send, 403 -> mark blocked, 429 -> retry-after)
+- [ ] 10.3 Add `subscribers.ts` data access: upsert citizen (chatId + rounded locKey), upsert school-follower (chatId + schoolId), list by locKey / by schoolId, mark blocked, track lastAlertTier per subscriber (Verify by: unit test with mocked DocumentClient passes)
+- [ ] 10.4 Add `notify.ts` channel-agnostic sender: given {schoolId, tier, aqi, advisoryEn, advisoryHi} publishes email (existing snsApi) AND Telegram messages to matching subscribers; dedupe per subscriber via lastAlertTier (Verify by: unit test with mocked SNS + Telegram passes; email path unchanged when no subscribers)
+- [ ] 10.5 Wire `evaluateSchool` to call notify (Verify by: existing evaluate tests still pass + one new test shows both channels called on ORANGE rise)
+- [ ] 10.6 sam local invoke test: seed localdb.json with two citizen subscribers + one school-follower, simulate RED, confirm both get a Telegram-shaped message logged (Verify by: local invoke output shows two sendMessage payloads)
+- [ ] 10.7 Git commit: `phase-10: telegram fan-out in shared evaluate path` (Verify by: `git log -1`)
+
+**Phase 10 gate:** simulate RED sends email AND Telegram alerts, once per subscriber, no OpenAQ call per person beyond the grouped lookup.
+
+---
+
+## Phase 11 (new, P1): AI layer — Hugging Face with token fallback
+
+**Goal:** RULES DECIDE, AI EXPLAINS: cached audience advisories per tier+audience+lang, Telegram Q&A grounded in the approved rules, safe fallback when AI is unavailable.
+
+- [ ] 11.1 Add `ai/` module: `hf.ts` client for `POST https://router.huggingface.co/v1/chat/completions` (Bearer token from env HF_TOKENS ordered list, default HF_TOKEN_1,HF_TOKEN_2; HF_MODEL env var; 3s timeout, max_tokens 160, no streaming) (Verify by: unit test with mocked fetch checks request shape from current docs: Authorization header, model, messages, max_tokens)
+- [ ] 11.2 Token fallback + DynamoDB exhaustion: `tokenStatus.ts` (mark exhausted with cooldown on 402/429-quota, short cooldown on 5xx/timeout), chain token 1 → token 2 → null (Verify by: unit test: token1 returns 402, token2 returns valid chat completion; both exhausted → null without network call)
+- [ ] 11.3 Output safety check: length cap, no "outdoor is safe" on ORANGE/RED, no medical diagnosis; drop AI text on failure (Verify by: unit test passes on bad outputs)
+- [ ] 11.4 Rate limits in DynamoDB: per-user Q&A N/hour + global/day; polite rule-based reply when hit (Verify by: unit test passes)
+- [ ] 11.5 Audience advisories cached per `tier#audience#lang`: model writes English, Amazon Translate converts to Hindi, both cached; final message = rule block + AI addition (Verify by: unit test: cache hit avoids network; HF failure returns rule text only)
+- [ ] 11.6 Telegram Q&A handler: grounded system prompt with tier + approved rules + untrusted-user-text guard; health questions refer to a doctor (Verify by: unit test with mocked HF client + prompt snapshot)
+- [ ] 11.7 Add `/explain` for the current category with a fixed rule-based explanation fallback (Verify by: unit test)
+- [ ] 11.8 Add HF_TOKEN_1, HF_TOKEN_2 (NoEcho), HF_MODEL, ai/ env wiring to template.yaml (Verify by: `sam validate` passes)
+- [ ] 11.9 Git commit: `phase-11: HF AI layer with token fallback and safety checks` (Verify by: `git log -1`)
+
+**Phase 11 gate:** Q&A answers arrive under the rule block; forcing both tokens to fail still answers with rule-based text; rate limits enforced and tested.
+
+---
+
+## Phase 12 (new): Dashboard + demo polish for Telegram/AI
+
+**Goal:** Show Telegram deep link per school and demo the fallback on demand.
+
+- [ ] 12.1 Dashboard: per-school "Subscribe on Telegram" button linking to `https://t.me/<bot>?start=school_<schoolId>` (Verify by: clicking opens the bot with the right payload)
+- [ ] 12.2 Update README Future Scope (remove Bedrock; add WhatsApp — needs Meta business verification and paid templates —, SQS fan-out) and architecture diagram with Telegram + HF chain (Verify by: README renders correctly on GitHub)
+- [ ] 12.3 Update docs/DEMO_SCRIPT.md: phone registration -> simulate -> Telegram alert -> ask question -> simulate token-1 failure -> fallback answer (Verify by: script matches new PRD §13 table)
+- [ ] 12.4 Git commit: `phase-12: dashboard deep link + demo polish` (Verify by: `git log -1`)
 
 ---
 
