@@ -2,8 +2,13 @@
 // updates into the conversation layer (task 9R.4).
 // No network: we call the handler directly with fake API Gateway events and
 // injected bot deps, so nothing reaches Telegram.
-import { test, expect, beforeEach } from 'vitest';
-import { handler, createWebhookHandler, verifySecret, getHeader, type WebhookDeps } from '../functions/telegramWebhook';
+import { test, expect, beforeEach, afterEach, vi } from 'vitest';
+import {
+  handler, createWebhookHandler, productionDeps, verifySecret, getHeader,
+  type WebhookDeps,
+} from '../functions/telegramWebhook';
+import * as subscribers from '../lib/subscribers';
+import { OpenAqError } from '../lib/openaq';
 
 /** Minimal bot deps that record what the webhook decided to send. */
 function fakeDeps(opts: { existing?: Record<string, unknown>; throwOnSave?: boolean } = {}) {
@@ -164,6 +169,79 @@ test('a malformed JSON body is acknowledged, never a 5xx', async () => {
   const res = await createWebhookHandler(deps)({ headers: { 'x-telegram-bot-api-secret-token': SECRET }, body: '{not json' });
 
   expect(res.statusCode).toBe(200);
+});
+
+// ---------------------------------------------------------------------------
+// Production wiring. This is assembled only at runtime, so a typo here would
+// show up for the first time on a real deploy - the same blind spot that hid the
+// missing esbuild build method. Everything is checked offline.
+// ---------------------------------------------------------------------------
+
+interface FetchCall { url: string; init?: RequestInit }
+
+function stubFetch(responses: { status: number; body: unknown }[]) {
+  const calls: FetchCall[] = [];
+  let i = 0;
+  vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+    calls.push({ url, init });
+    const r = responses[Math.min(i, responses.length - 1)]!;
+    i += 1;
+    return new Response(JSON.stringify(r.body), {
+      status: r.status,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  });
+  return calls;
+}
+
+beforeEach(() => {
+  process.env.SUBSCRIBERS_TABLE = 'subscribers-test';
+  process.env.OPENAQ_API_KEY = 'test-openaq-key';
+  process.env.TELEGRAM_BOT_TOKEN = '123456:AA-test-token';
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+test('productionDeps wires the subscriber store to the real subscribers module', () => {
+  const { bot } = productionDeps();
+
+  expect(bot.getSubscriber).toBe(subscribers.getSubscriber);
+  expect(bot.saveLocation).toBe(subscribers.upsertCitizen);
+  expect(bot.setActive).toBe(subscribers.setActive);
+  expect(bot.markBlocked).toBe(subscribers.markBlocked);
+});
+
+test('productionDeps reaches OpenAQ with the configured key (no real network)', async () => {
+  const calls = stubFetch([{ status: 500, body: { error: 'boom' } }]);
+
+  const { bot } = productionDeps();
+  await expect(bot.fetchPm25(28.6139, 77.209)).rejects.toBeInstanceOf(OpenAqError);
+
+  expect(calls[0]!.url).toContain('https://api.openaq.org/v3/locations');
+  expect(calls[0]!.url).toContain('coordinates=28.6139,77.209');
+  expect((calls[0]!.init?.headers as Record<string, string>)['X-API-Key']).toBe('test-openaq-key');
+});
+
+test('productionDeps talks to Telegram at the documented path with the bot token', async () => {
+  const calls = stubFetch([{ status: 200, body: { ok: true, result: { message_id: 5 } } }]);
+
+  const { bot } = productionDeps();
+  const res = await bot.tg.sendMessage(555, 'hello');
+
+  expect(res).toEqual({ ok: true, sent: 1, messageIds: [5] });
+  expect(calls[0]!.url).toBe('https://api.telegram.org/bot123456:AA-test-token/sendMessage');
+  expect(JSON.parse(String(calls[0]!.init?.body)).chat_id).toBe(555);
+});
+
+test('the production handler refuses a wrong secret before touching anything', async () => {
+  const calls = stubFetch([{ status: 200, body: { ok: true } }]);
+
+  const res = await handler({ headers: { 'x-telegram-bot-api-secret-token': 'nope' }, body: JSON.stringify(startUpdate) });
+
+  expect(res.statusCode).toBe(403);
+  expect(calls).toHaveLength(0); // nothing went out to Telegram or OpenAQ
 });
 
 test('the real handler stays offline for updates that need no reply', async () => {
