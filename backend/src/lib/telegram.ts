@@ -36,7 +36,7 @@ export interface TgUpdate {
 
 /** Commands the bot understands today (others are reported as `unknown`). */
 // Exactly the commands the bot answers. Keep this in step with the @BotFather
-// command menu (docs/TELEGRAM_BOT.md) so users are never shown one it ignores.
+// command menu (README, Deploy step 2) so users are never shown one it ignores.
 export const COMMANDS = ['start', 'status', 'stop', 'help'] as const;
 export type Command = (typeof COMMANDS)[number];
 

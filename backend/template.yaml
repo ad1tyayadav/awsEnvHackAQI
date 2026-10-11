@@ -143,7 +143,7 @@ Outputs:
   ApiBaseUrl:
     Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/${Stage}
   WebhookUrl:
-    Description: Pass this as `url` to setWebhook (docs/TELEGRAM_BOT.md)
+    Description: Pass this as `url` to setWebhook (README, Deploy step 4)
     Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/${Stage}/telegram/webhook
   SchedulerFunctionName:
     Description: Invoke this by hand to test the automatic alert without waiting 30 minutes

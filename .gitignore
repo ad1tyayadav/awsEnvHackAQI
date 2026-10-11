@@ -4,5 +4,12 @@ node_modules
 .aws-sam
 .next
 out
-cc.bat
+
+# Internal working files: local only, never published.
+# The public repo is meant to be source code + README.
+docs/
+PRD.md
+PROGRESS.md
+Agents.md
 pitch.md
+cc.bat
