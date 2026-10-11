@@ -171,14 +171,38 @@
 - [x] 9.1 Create the bot with @BotFather; get the token and a random webhook secret. NoEcho SAM params `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET` (Verify by: so far only template.yaml edit; `sam validate` passes) — SAM CLI absent here, verified with `node scripts/validate-template.mjs` (YAML parses, NoEcho params present, core resources intact) + all 44 unit tests still pass. BotFather creation is a human step; developer must run `/newbot` and supply the token + secret at deploy time.
 - [x] 9.2 Add `telegramWebhook` Lambda + API route `/telegram/webhook`; validate `X-Telegram-Bot-Api-Secret-Token` header, return 403 on mismatch, 200 otherwise (Verify by: unit tests for both header cases; `sam build` passes) — verified with `npm test` (52 passing, 8 new webhook tests incl. case-insensitive header, wrong/empty/missing header, unconfigured secret) + `npm run typecheck` + `node scripts/validate-template.mjs`. `sam build` N/A: SAM CLI not installed on this machine.
 - [x] 9.3 Update parser in `telegram.ts`: extract /start payload (school_<id> deep link), commands, callback_query (language buttons), location message, plain text (Verify by: unit test on sample Update fixtures per current Bot API docs) — `src/lib/telegram.ts` + 11 tests on Bot API-shaped Update fixtures; invalid/malformed updates return `ignored` instead of throwing. Verified: `npm test` 63 passing, `npm run typecheck` clean.
-- [ ] 9.4 /start flow: inline language buttons (English/Hindi), location request button, duplicate /start is idempotent (Verify by: unit test)
-- [ ] 9.5 /status: resolve subscriber location (own or school), fetch nearest PM2.5 using existing `fetchNearestPM25` + pure AQI/tier code, reply with cached advisory in chosen language (Verify by: unit test; then `sam local invoke` with a fixture Update JSON)
-- [ ] 9.6 /language switches lang; /stop marks subscriber inactive; invalid location/no nearby station send clear bilingual error texts (Verify by: unit test)
-- [ ] 9.7 setWebhook runbook in docs/TELEGRAM_BOT.md (secret_token param, allowed_updates, deleteWebhook for local dev); live end-to-end test with a real chat (Verify by: register on a phone and receive /status reply)
-- [ ] 9.8 Update res/telegram fixtures; add Telegram deep-link endpoint GET /schools/{id}/telegram returning `{deepLink}` (Verify by: unit test + curl against local server)
-- [ ] 9.9 Git commit: `phase-9: telegram bot registration, commands, webhook` (Verify by: `git log -1`)
+- [~] 9.4–9.9 SUPERSEDED by **Phase 9R** below (scope changed to citizen-only, English-only, no schools).
 
 **Phase 9 gate (citizen-first):** on a phone: /start -> language -> share location -> /status reply — and that is ALL a citizen ever needs to do. Deep link subscribes a follower to a school; wrong secret token returns 403. Re-registering the same chat never duplicates.
+
+---
+
+## Phase 9R (APPROVED REDIRECT): Telegram bot ONLY — citizen air-alert bot, no schools
+
+**Developer decision (2026-10-11):** the product is now JUST the bot. A user does `/start` and shares
+location ONCE. From then on the bot messages them automatically when the air goes bad for their area,
+and they can ask for a reading manually any time. Decisions: **English only** (no language buttons),
+**alert on ORANGE and RED**, and the **school dashboard + email code is REMOVED** (task 9R.10).
+
+**Kept from 9.1–9.3:** NoEcho bot params, `telegramWebhook` Lambda + secret-header gate, `parseUpdate`.
+
+**The whole user journey:** `/start` -> share location -> done. Then: auto alert on ORANGE/RED rise, `/status` on demand, `/stop` to go quiet.
+
+- [x] 9R.1 `telegram.ts` Bot API client: `sendMessage` (plain text, 4096-char split), location-request reply keyboard, error mapping (403 -> blocked, 429 -> respect `retry_after`), all calls through an injectable `fetch` (Verify by: unit tests with mocked fetch — normal send, 403, 429 retry, long-message split) — `createTgClient(token, {fetchLike,sleep})`, `splitMessage`, `locationKeyboard`; 14 new tests in `src/tests/telegramClient.test.ts`, `npm test` 77 passing, `npm run typecheck` clean. No `parse_mode` sent on purpose, so station names can never break a send; a 429 only waits when `retry_after` <= 30s so a Lambda is never held open.
+- [ ] 9R.2 Add `SubscribersTable` (PK `chatId`, on-demand) to `template.yaml` + pass `SUBSCRIBERS_TABLE` to the webhook and scheduler Lambdas (Verify by: `node scripts/validate-template.mjs` OK)
+- [ ] 9R.3 `subscribers.ts` data access: upsert citizen (chatId, lat, lng, locKey, active, blocked, lastAlertTier), get by chatId, list all ACTIVE, list distinct locKeys, mark blocked, unsubscribe/reactivate (Verify by: unit tests with mocked DocumentClient)
+- [ ] 9R.4 `/start` flow: welcome + "share my location" button; save location on receipt; confirm + show current reading; re-running `/start` UPDATES, never duplicates (Verify by: unit tests on fixture Updates, incl. `/start` twice)
+- [ ] 9R.5 `/status`: nearest PM2.5 via existing `fetchNearestPM25` + pure AQI/tier code -> reply with AQI, tier, station name and the English action plan (Verify by: unit tests with mocked OpenAQ, incl. no-location and no-station cases)
+- [ ] 9R.6 `/stop` marks inactive and `/start` re-activates; clear error text when no station is within range or location is missing (Verify by: unit tests)
+- [ ] 9R.7 Scheduler fan-out: `fetchAndEvaluate` loops distinct citizen `locKey` groups, fetches OpenAQ ONCE per group, evaluates with the shared pipeline, sends each subscriber an alert only on an ORANGE/RED rise (per-subscriber `lastAlertTier` dedupe) (Verify by: unit test — 3 citizens sharing a locKey -> exactly 1 OpenAQ fetch, 3 sends, no repeat on the second run)
+- [ ] 9R.8 setWebhook runbook in `docs/TELEGRAM_BOT.md` (secret_token, allowed_updates, deleteWebhook for local dev) + live phone test (Verify by: register on a real phone and receive the `/status` reply)
+- [ ] 9R.9 Git commit: `phase-9r: citizen telegram bot with automatic air alerts` (Verify by: `git log -1`)
+- [ ] 9R.10 REMOVE the school product surface now that the bot is the whole product: delete `frontend/`, the `api` Lambda + its route/tests, school/readings/advisory/alerts tables, the SNS topic + email code, and the Amazon Translate path; rewrite README + demo docs for the bot (Verify by: `npm test` green on the remaining tests, `node scripts/validate-template.mjs` OK, `git grep -i "school"` shows only intentional leftovers)
+- [ ] 9R.11 Git commit: `phase-9r: remove school dashboard and email surface` (Verify by: `git log -1`)
+
+**Phase 9R gate:** on a phone: `/start` -> share location -> `/status` replies with AQI + tier + action plan -> simulate a RED rise -> the bot messages the user automatically, exactly once. Wrong webhook secret returns 403. `/stop` goes quiet, `/start` resumes.
+
+> Supersedes task 9.8 (deep link) — there are no schools to follow any more.
 
 ---
 
@@ -203,7 +227,12 @@
 
 ---
 
-## Phase 10 (new, P0): Telegram alert fan-out — citizen-first monitoring
+## Phase 10 (SUPERSEDED by Phase 9R): Telegram alert fan-out — citizen-first monitoring
+
+> **Superseded (2026-10-11).** The fan-out now lives in Phase 9R task 9R.7 (citizen locKey groups only).
+> Phase 10's school-follower half (10.1/10.6) and the deep-link work are dropped with the school surface.
+> The Subscribers table (10.1), the Bot API client (10.2), `subscribers.ts` (10.3) and the fan-out (10.5)
+> are delivered earlier as 9R.1–9R.3 and 9R.7. Keep the tasks below only as reference for the email path.
 
 **Goal:** Citizen locations are FIRST-CLASS: the scheduler monitors registered schools AND distinct citizen locKey groups; on a tier rise every matched subscriber gets a Telegram alert (dedupe per subscriber). OpenAQ is called once per group, not once per person.
 
@@ -242,7 +271,7 @@
 
 **Goal:** Show Telegram deep link per school and demo the fallback on demand.
 
-- [ ] 12.1 Dashboard: per-school "Subscribe on Telegram" button linking to `https://t.me/<bot>?start=school_<schoolId>` (Verify by: clicking opens the bot with the right payload)
+- [~] 12.1 Dashboard: per-school "Subscribe on Telegram" button linking to `https://t.me/<bot>?start=school_<schoolId>` (Verify by: clicking opens the bot with the right payload) — DROPPED, no dashboard and no schools in Phase 9R
 - [ ] 12.2 Update README Future Scope (remove Bedrock; add WhatsApp — needs Meta business verification and paid templates —, SQS fan-out) and architecture diagram with Telegram + HF chain (Verify by: README renders correctly on GitHub)
 - [ ] 12.3 Update docs/DEMO_SCRIPT.md: phone registration -> simulate -> Telegram alert -> ask question -> simulate token-1 failure -> fallback answer (Verify by: script matches new PRD §13 table)
 - [ ] 12.4 Git commit: `phase-12: dashboard deep link + demo polish` (Verify by: `git log -1`)
