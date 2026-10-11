@@ -157,6 +157,18 @@ curl "https://api.telegram.org/bot$TOKEN/deleteWebhook"
 Either way the bot's own logic is fully unit-tested (`npm test` — no AWS, no
 network, no Telegram), so the fast loop is the test suite, not the phone.
 
+### See the whole conversation without deploying anything
+
+```bash
+cd backend && npx tsx scripts/preview-bot.ts
+```
+
+This drives the real `lib/bot.ts` and `lib/fanout.ts` through fake deps and
+prints, verbatim, every message a user would receive: `/start`, sharing a
+location, a repeated `/start`, `/status`, `/stop`, free text, then two scheduler
+runs showing three alerts going out and the second run staying silent. No AWS,
+no OpenAQ, no bot token. Use it to proof-read the copy before a demo.
+
 ---
 
 ## What a subscriber row looks like
