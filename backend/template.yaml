@@ -1,27 +1,29 @@
-# Clean Air Day-Planner for Schools - SAM template
-# Creates: 4 DynamoDB tables, fetchAndEvaluate Lambda, (later phases add SNS, EventBridge, API GW)
+# Clean Air Telegram bot - SAM template (Phase 9R: citizen-only scope).
+# Creates: 1 DynamoDB table (subscribers), 2 Lambdas (the 30-minute scheduler and
+# the Telegram webhook), 1 HTTP API for the webhook route, 1 EventBridge rule.
+# No schools, no dashboard, no email, no SNS, no Translate: deleted in task 9R.10.
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: Clean Air Day-Planner for Schools (AWS Bharat Build, Track 01 Air)
+Description: Clean Air Telegram bot - automatic air-quality alerts for citizens (AWS Bharat Build, Track 01 Air)
 
 Parameters:
   OpenAQApiKey:
     Type: String
     NoEcho: true
     Description: OpenAQ v3 API key
-  Stage:
-    Type: String
-    Default: prod
   TelegramBotToken:
     Type: String
     NoEcho: true
-    Description: Telegram bot token from @BotFather (task 9.1)
+    Description: Telegram bot token from @BotFather
     Default: ''
   TelegramWebhookSecret:
     Type: String
     NoEcho: true
-    Description: Random secret sent in X-Telegram-Bot-Api-Secret-Token header (task 9.1)
+    Description: Random secret sent in the X-Telegram-Bot-Api-Secret-Token header
     Default: ''
+  Stage:
+    Type: String
+    Default: prod
 
 Globals:
   Function:
@@ -38,69 +40,9 @@ Globals:
         TELEGRAM_WEBHOOK_SECRET: !Ref TelegramWebhookSecret
 
 Resources:
-  # DynamoDB tables (PRD section 8)
-  SchoolsTable:
-    Type: AWS::DynamoDB::Table
-    Properties:
-      TableName: !Sub cleanair-schools-${Stage}
-      BillingMode: PAY_PER_REQUEST
-      AttributeDefinitions:
-        - AttributeName: schoolId
-          AttributeType: S
-      KeySchema:
-        - AttributeName: schoolId
-          KeyType: HASH
-
-  ReadingsTable:
-    Type: AWS::DynamoDB::Table
-    Properties:
-      TableName: !Sub cleanair-readings-${Stage}
-      BillingMode: PAY_PER_REQUEST
-      AttributeDefinitions:
-        - AttributeName: schoolId
-          AttributeType: S
-        - AttributeName: ts
-          AttributeType: S
-      KeySchema:
-        - AttributeName: schoolId
-          KeyType: HASH
-        - AttributeName: ts
-          KeyType: RANGE
-      TimeToLiveSpecification:
-        AttributeName: ttl
-        Enabled: true
-
-  AdvisoryCacheTable:
-    Type: AWS::DynamoDB::Table
-    Properties:
-      TableName: !Sub cleanair-advisory-cache-${Stage}
-      BillingMode: PAY_PER_REQUEST
-      AttributeDefinitions:
-        - AttributeName: key
-          AttributeType: S
-      KeySchema:
-        - AttributeName: key
-          KeyType: HASH
-
-  AlertsTable:
-    Type: AWS::DynamoDB::Table
-    Properties:
-      TableName: !Sub cleanair-alerts-${Stage}
-      BillingMode: PAY_PER_REQUEST
-      AttributeDefinitions:
-        - AttributeName: schoolId
-          AttributeType: S
-        - AttributeName: ts
-          AttributeType: S
-      KeySchema:
-        - AttributeName: schoolId
-          KeyType: HASH
-        - AttributeName: ts
-          KeyType: RANGE
-
-  # Phase 9R: one row per Telegram chat that pressed /start (PK chatId).
-  # locKey = the chat's coordinates rounded to ~2 km, so everyone in the same
-  # neighbourhood shares one OpenAQ lookup in the scheduler fan-out.
+  # One row per Telegram chat that pressed /start. Partition key is the chatId;
+  # locKey (the chat's coordinates snapped to ~2 km) groups neighbours so the
+  # scheduler can read OpenAQ once per neighbourhood.
   SubscribersTable:
     Type: AWS::DynamoDB::Table
     Properties:
@@ -113,12 +55,7 @@ Resources:
         - AttributeName: chatId
           KeyType: HASH
 
-  # SNS topic for air alerts (Phase 4)
-  AirAlertsTopic:
-    Type: AWS::SNS::Topic
-    Properties:
-      TopicName: !Sub cleanair-alerts-${Stage}
-
+  # The scheduler: every 30 minutes, monitor each neighbourhood and alert on a rise.
   FetchAndEvaluateFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -126,25 +63,10 @@ Resources:
       FunctionName: !Sub cleanair-fetch-evaluate-${Stage}
       Environment:
         Variables:
-          SCHOOLS_TABLE: !Ref SchoolsTable
-          READINGS_TABLE: !Ref ReadingsTable
-          ADVISORY_TABLE: !Ref AdvisoryCacheTable
-          ALERTS_TABLE: !Ref AlertsTable
           SUBSCRIBERS_TABLE: !Ref SubscribersTable
-          ALERT_TOPIC_ARN: !Ref AirAlertsTopic
       Policies:
-        - DynamoDBCrudPolicy: { TableName: !Ref SchoolsTable }
-        - DynamoDBCrudPolicy: { TableName: !Ref ReadingsTable }
-        - DynamoDBCrudPolicy: { TableName: !Ref AdvisoryCacheTable }
-        - DynamoDBCrudPolicy: { TableName: !Ref AlertsTable }
         - DynamoDBCrudPolicy: { TableName: !Ref SubscribersTable }
-        - Version: '2012-10-17'
-          Statement:
-            - Effect: Allow
-              Action: sns:Publish
-              Resource: !Ref AirAlertsTopic
 
-  # Phase 5: 30-minute schedule (PRD F2)
   FetchScheduleRule:
     Type: AWS::Events::Rule
     Properties:
@@ -163,53 +85,18 @@ Resources:
       Principal: events.amazonaws.com
       SourceArn: !GetAtt FetchScheduleRule.Arn
 
-  # Phase 5: HTTP API for the dashboard
+  # HTTP API: exists only to give Telegram an HTTPS endpoint for the webhook.
+  # No browser client calls this, so there is no CORS configuration. Throttling
+  # stays on so a rogue caller cannot run up the bill.
   HttpApi:
     Type: AWS::Serverless::HttpApi
     Properties:
       StageName: !Ref Stage
-      CorsConfiguration:
-        AllowOrigins: ['*'] # tightened to the Amplify domain in Phase 7
-        AllowMethods: [GET, POST, OPTIONS]
-        AllowHeaders: [Content-Type]
       DefaultRouteSettings:
         ThrottlingBurstLimit: 20
         ThrottlingRateLimit: 10
 
-  ApiFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      CodeUri: src/functions/api/
-      FunctionName: !Sub cleanair-api-${Stage}
-      Handler: index.handler
-      Environment:
-        Variables:
-          SCHOOLS_TABLE: !Ref SchoolsTable
-          READINGS_TABLE: !Ref ReadingsTable
-          ADVISORY_TABLE: !Ref AdvisoryCacheTable
-          ALERTS_TABLE: !Ref AlertsTable
-          ALERT_TOPIC_ARN: !Ref AirAlertsTopic
-          OPENAQ_API_KEY: !Ref OpenAQApiKey
-      Events:
-        Api:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /{proxy+}
-            Method: ANY
-      Policies:
-        - DynamoDBCrudPolicy: { TableName: !Ref SchoolsTable }
-        - DynamoDBCrudPolicy: { TableName: !Ref ReadingsTable }
-        - DynamoDBCrudPolicy: { TableName: !Ref AdvisoryCacheTable }
-        - DynamoDBCrudPolicy: { TableName: !Ref AlertsTable }
-        - Version: '2012-10-17'
-          Statement:
-            - Effect: Allow
-              Action: sns:Publish
-              Resource: !Ref AirAlertsTopic
-
-  # Phase 9: Telegram bot webhook. Only the secret-header gate exists today
-  # (task 9.2); subscriber storage is added in Phase 10.
+  # The webhook: verifies Telegram's secret header, then routes the update.
   TelegramWebhookFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -219,7 +106,7 @@ Resources:
         Variables:
           SUBSCRIBERS_TABLE: !Ref SubscribersTable
       Policies:
-        # Least privilege: this Lambda only reads/writes subscribers.
+        # Least privilege: this Lambda only reads and writes subscribers.
         - DynamoDBCrudPolicy: { TableName: !Ref SubscribersTable }
       Events:
         Api:
@@ -230,7 +117,11 @@ Resources:
             Method: POST
 
 Outputs:
-  FetchAndEvaluateArn:
-    Value: !GetAtt FetchAndEvaluateFunction.Arn
   ApiBaseUrl:
     Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/${Stage}
+  WebhookUrl:
+    Description: Pass this as `url` to setWebhook (docs/TELEGRAM_BOT.md)
+    Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/${Stage}/telegram/webhook
+  SchedulerFunctionName:
+    Description: Invoke this by hand to test the automatic alert without waiting 30 minutes
+    Value: !Ref FetchAndEvaluateFunction

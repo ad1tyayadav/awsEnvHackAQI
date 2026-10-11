@@ -1,7 +1,7 @@
 {
-  "name": "clean-air-backend",
+  "name": "clean-air-bot-backend",
   "version": "0.1.0",
-  "description": "Clean Air Day-Planner for Schools - backend",
+  "description": "Clean Air Telegram bot - backend (citizen air-quality alerts)",
   "private": true,
   "scripts": {
     "test": "vitest run",
@@ -17,11 +17,6 @@
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.700.0",
-    "@aws-sdk/client-sns": "^3.700.0",
-    "@aws-sdk/client-translate": "^3.700.0",
-    "@aws-sdk/lib-dynamodb": "^3.700.0",
-    "@aws-sdk/util-dynamodb": "^3.700.0",
-    "@types/nodemailer": "^8.0.2",
-    "nodemailer": "^10.1.0"
+    "@aws-sdk/lib-dynamodb": "^3.700.0"
   }
 }

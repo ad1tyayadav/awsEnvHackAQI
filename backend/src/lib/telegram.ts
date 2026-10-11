@@ -41,7 +41,7 @@ export const COMMANDS = ['start', 'status', 'language', 'stop', 'help', 'explain
 export type Command = (typeof COMMANDS)[number];
 
 export type Intent =
-  | { kind: 'start'; chatId: number; schoolId?: string; payload?: string }
+  | { kind: 'start'; chatId: number; payload?: string }
   | { kind: 'command'; chatId: number; command: Command | 'unknown'; args: string[] }
   | { kind: 'language'; chatId: number; lang: Lang }
   | { kind: 'location'; chatId: number; lat: number; lng: number; firstName?: string }
@@ -56,14 +56,16 @@ export function isLang(v: unknown): v is Lang {
   return v === 'en' || v === 'hi';
 }
 
-/** `/start` may carry a deep-link payload, e.g. `school_sch_1728_ab12cd`. */
-export function parseStartPayload(raw: string | undefined): { schoolId?: string; payload?: string } {
+/**
+ * `/start` may carry a deep-link payload (`t.me/<bot>?start=<payload>`), which
+ * Telegram passes as the first word of the message. Returns it when it matches
+ * the documented alphabet, otherwise nothing. Nothing uses a payload today —
+ * the school deep link was dropped with the school surface — so this is kept
+ * only as validated input rather than interpreted.
+ */
+export function parseStartPayload(raw: string | undefined): { payload?: string } {
   const payload = (raw ?? '').trim().split(/\s+/)[0] ?? '';
   if (!payload || !PAYLOAD_RE.test(payload)) return {};
-  if (payload.startsWith('school_')) {
-    const schoolId = payload.slice('school_'.length);
-    return schoolId ? { schoolId, payload } : { payload };
-  }
   return { payload };
 }
 
@@ -111,10 +113,8 @@ export function parseUpdate(update: TgUpdate | undefined | null): Intent {
     const command = m[1]!.toLowerCase();
     const args = (m[2] ?? '').trim().split(/\s+/).filter(Boolean);
     if (command === 'start') {
-      const { schoolId, payload } = parseStartPayload(args[0]);
-      return schoolId === undefined && payload === undefined
-        ? { kind: 'start', chatId }
-        : { kind: 'start', chatId, ...(schoolId ? { schoolId } : {}), ...(payload ? { payload } : {}) };
+      const { payload } = parseStartPayload(args[0]);
+      return payload === undefined ? { kind: 'start', chatId } : { kind: 'start', chatId, payload };
     }
     const known = (COMMANDS as readonly string[]).includes(command) ? (command as Command) : 'unknown';
     return { kind: 'command', chatId, command: known, args };

@@ -13,12 +13,13 @@ test('/start with no payload', () => {
   expect(parseUpdate(msg({ text: '/start' }))).toEqual({ kind: 'start', chatId: CHAT.id });
 });
 
-test('/start with school deep-link payload', () => {
-  expect(parseUpdate(msg({ text: '/start school_sch_1728_ab12cd' }))).toEqual({
+test('/start with a deep-link payload keeps the raw payload, uninterpreted', () => {
+  // The school deep link is gone with the school surface; a payload is now only
+  // carried through, never turned into a subscription.
+  expect(parseUpdate(msg({ text: '/start myref_123' }))).toEqual({
     kind: 'start',
     chatId: CHAT.id,
-    schoolId: 'sch_1728_ab12cd',
-    payload: 'school_sch_1728_ab12cd',
+    payload: 'myref_123',
   });
 });
 
@@ -31,8 +32,10 @@ test('/start drops a payload with bad chars or over 64 chars, but still starts',
   expect(parseStartPayload('ref extra')).toEqual({ payload: 'ref' });
 });
 
-test('/start school_ with empty id falls back to plain start', () => {
-  expect(parseStartPayload('school_')).toEqual({ payload: 'school_' });
+test('an empty or invalid payload falls back to a plain start', () => {
+  expect(parseStartPayload('')).toEqual({});
+  expect(parseStartPayload(undefined)).toEqual({});
+  expect(parseStartPayload('bad!chr')).toEqual({});
 });
 
 test('location message becomes a location intent and carries the first name', () => {

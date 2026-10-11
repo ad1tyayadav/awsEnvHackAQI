@@ -5,8 +5,8 @@
 // per bucket. Everyone in a bucket gets the same reading, so a thousand users
 // in one neighbourhood still cost one API call.
 //
-// Alerting uses the same rule as the schools path: `shouldAlert` fires only on
-// an escalation into ORANGE or RED, and each subscriber carries their own
+// Alerting uses the one shared rule in tiers.ts: `shouldAlert` fires only on an
+// escalation into ORANGE or RED, and each subscriber carries their own
 // `lastAlertTier`, so nobody is told twice about the same bad day.
 import { pm25ToAqi } from './aqi';
 import { formatAlert } from './bot';

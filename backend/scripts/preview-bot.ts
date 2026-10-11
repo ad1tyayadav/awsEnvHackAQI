@@ -90,7 +90,7 @@ async function main(): Promise<void> {
 
   show('USER: /status', await handleIntent({ kind: 'command', chatId: CHAT, command: 'status', args: [] }, deps));
 
-  show('USER: "is it safe to send my child to school?"', await handleIntent({ kind: 'text', chatId: CHAT, text: 'is it safe?' }, deps));
+  show('USER: "is it safe to go for a run today?"', await handleIntent({ kind: 'text', chatId: CHAT, text: 'is it safe to go for a run today?' }, deps));
 
   show('USER: /stop', await handleIntent({ kind: 'command', chatId: CHAT, command: 'stop', args: [] }, deps));
   console.log(`setActive calls: ${activeCalls.join(', ')}\n`);

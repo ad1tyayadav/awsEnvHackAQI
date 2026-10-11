@@ -44,18 +44,40 @@ for (const p of secretParams) {
   must(doc.Parameters?.[p]?.NoEcho === true, `Parameter ${p} must be NoEcho`);
 }
 const res = doc.Resources ?? {};
-const mustTables = ['SchoolsTable', 'ReadingsTable', 'AdvisoryCacheTable', 'AlertsTable'];
+const names = Object.keys(res);
+
+// --- What the citizen bot needs (Phase 9R scope) ---------------------------------
+const mustTables = ['SubscribersTable'];
 for (const t of mustTables) must(res[t]?.Type === 'AWS::DynamoDB::Table', `missing table ${t}`);
 for (const t of mustTables) {
   const tpl = res[t]?.Properties?.TableName ?? '';
   // stripCfTags stashed `${Stage}` as `<__SUB__Stage>`; accept either form.
   must(tpl.includes('Stage') && (tpl.includes('<__SUB__Stage>') || tpl.includes('${Stage}')), `${t} TableName must include Stage`);
 }
+must(res.SubscribersTable?.Properties?.KeySchema?.[0]?.AttributeName === 'chatId', 'SubscribersTable PK must be chatId');
 must(res.FetchAndEvaluateFunction?.Type === 'AWS::Serverless::Function', 'missing fetchAndEvaluate function');
-must(res.ApiFunction?.Type === 'AWS::Serverless::Function', 'missing api function');
+must(res.TelegramWebhookFunction?.Type === 'AWS::Serverless::Function', 'missing telegramWebhook function');
 must(res.HttpApi?.Type === 'AWS::Serverless::HttpApi', 'missing HttpApi');
-must(res.AirAlertsTopic?.Type === 'AWS::SNS::Topic', 'missing SNS topic');
 must(res.FetchScheduleRule?.Type === 'AWS::Events::Rule', 'missing schedule rule');
+
+// Telegram must be able to reach the webhook: a POST route on the HTTP API.
+const route = JSON.stringify(res.TelegramWebhookFunction?.Properties?.Events ?? {});
+must(route.includes('/telegram/webhook'), 'telegramWebhook must be routed on POST /telegram/webhook');
+must(route.includes('HttpApi'), 'telegramWebhook route must use the shared HttpApi');
+
+// Neither Lambda may hold table names it does not use: least privilege.
+const envOf = (fn) => res[fn]?.Properties?.Environment?.Variables ?? {};
+for (const fn of ['FetchAndEvaluateFunction', 'TelegramWebhookFunction']) {
+  must(typeof envOf(fn).SUBSCRIBERS_TABLE === 'string' && envOf(fn).SUBSCRIBERS_TABLE.includes('SubscribersTable'), `${fn} must get SUBSCRIBERS_TABLE`);
+}
+
+// --- What must be GONE (task 9R.10 removed the school surface) --------------------
+for (const gone of ['SchoolsTable', 'ReadingsTable', 'AdvisoryCacheTable', 'AlertsTable', 'ApiFunction', 'AirAlertsTopic']) {
+  must(!names.includes(gone), `${gone} must be removed with the school surface (task 9R.10)`);
+}
+for (const banned of ['SCHOOLS_TABLE', 'READINGS_TABLE', 'ADVISORY_TABLE', 'ALERTS_TABLE', 'ALERT_TOPIC_ARN']) {
+  must(!JSON.stringify(res).includes(banned), `stale school env var ${banned} still referenced`);
+}
 
 // Global env must carry the new secrets through NoEcho parameters.
 const glob = doc.Globals?.Function?.Environment?.Variables ?? {};
