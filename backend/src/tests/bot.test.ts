@@ -1,9 +1,19 @@
-// Tests for the conversation layer (Phase 9R, task 9R.4: /start + location).
+// Tests for the conversation layer (Phase 9R: 9R.4 /start + location, 9R.5 /status).
 // BotDeps is injected, so these tests need no AWS, no OpenAQ and no network.
 import { test, expect, vi } from 'vitest';
-import { handleIntent, TEXTS, type BotDeps } from '../lib/bot';
+import { formatAirReport, handleIntent, TEXTS, type BotDeps } from '../lib/bot';
 import { locKeyFor, type Subscriber } from '../lib/subscribers';
+import { OpenAqError, type Pm25Reading } from '../lib/openaq';
+import { aqiToTier } from '../lib/tiers';
 import type { Intent } from '../lib/telegram';
+
+/** A station reading shaped like the OpenAQ client's output. */
+const READING: Pm25Reading = {
+  pm25: 105,
+  stationName: 'DPCC Anand Vihar',
+  stationId: 8118,
+  measuredAt: '2026-10-11T06:00:00Z',
+};
 
 interface Sent {
   chatId: number | string;
@@ -14,9 +24,12 @@ interface Sent {
 function fakeDeps(options: {
   existing?: Record<string, Subscriber>;
   sendFails?: 'blocked' | 'network' | 'bad_request';
+  /** what the OpenAQ lookup should do */
+  pm25?: Pm25Reading | 'no_station' | 'stale_data' | 'api_error' | 'timeout';
 } = {}) {
   const sent: Sent[] = [];
   const saved: { chatId: string; firstName?: string; lat: number; lng: number }[] = [];
+  const fetched: { lat: number; lng: number }[] = [];
   const subs = new Map<string, Subscriber>(Object.entries(options.existing ?? {}));
 
   const deps: BotDeps = {
@@ -34,6 +47,14 @@ function fakeDeps(options: {
         }
         return { ok: true, sent: 1, messageIds: [1] };
       },
+    },
+    fetchPm25: async (lat, lng) => {
+      fetched.push({ lat, lng });
+      if (options.pm25 === 'no_station') throw new OpenAqError('no_station', 'no station within 25 km');
+      if (options.pm25 === 'stale_data') throw new OpenAqError('stale_data', 'sensor reports are stale');
+      if (options.pm25 === 'api_error') throw new OpenAqError('api_error', 'HTTP 500');
+      if (options.pm25 === 'timeout') throw new OpenAqError('timeout', 'took too long');
+      return options.pm25 ?? READING;
     },
     getSubscriber: async (chatId) => subs.get(chatId) ?? null,
     saveLocation: async (input) => {
@@ -53,12 +74,13 @@ function fakeDeps(options: {
     },
   };
 
-  return { deps, sent, saved, subs };
+  return { deps, sent, saved, fetched, subs };
 }
 
-const existingSub = (locKey?: string): Subscriber => ({
+const existingSub = (locKey?: string, lat?: number, lng?: number): Subscriber => ({
   chatId: '555',
   ...(locKey ? { locKey } : {}),
+  ...(typeof lat === 'number' && typeof lng === 'number' ? { lat, lng } : {}),
   active: true,
   blocked: false,
   lastAlertTier: null,
@@ -123,7 +145,9 @@ test('sharing a location in a new area says updated, not saved', async () => {
   const outcome = await handleIntent({ kind: 'location', chatId: 555, lat: 28.6139, lng: 77.209 }, deps);
 
   expect(outcome.action).toBe('location.updated');
-  expect(sent[0]!.text).toBe(TEXTS.locationUpdated(locKeyFor(28.6139, 77.209)));
+  // the confirmation line, followed by the current reading (task 9R.5)
+  expect(sent[0]!.text).toContain(TEXTS.locationUpdated(locKeyFor(28.6139, 77.209)));
+  expect(sent[0]!.text).toContain('AQI 249');
 });
 
 test('sharing the same area again is not reported as a move', async () => {
@@ -191,4 +215,106 @@ test('ignored and not-yet-handled intents send nothing and say why', async () =>
   expect(unhandled).toEqual({ action: 'unhandled:text', sent: 0, blocked: false });
 
   expect(sent).toHaveLength(0);
+});
+
+// ---------------------------------------------------------------------------
+// task 9R.5: /status and the reading shown right after onboarding
+// ---------------------------------------------------------------------------
+
+const status = (chatId = 555): Intent => ({ kind: 'command', chatId, command: 'status', args: [] });
+
+test('/status with no shared location asks for one and never calls OpenAQ', async () => {
+  const { deps, sent, fetched } = fakeDeps();
+
+  const outcome = await handleIntent(status(), deps);
+
+  expect(outcome.action).toBe('status.no_location');
+  expect(sent[0]!.text).toBe(TEXTS.noLocation);
+  expect(fetched).toHaveLength(0);
+});
+
+test('/status reports AQI, tier, station and the action plan for the saved location', async () => {
+  const { deps, sent, fetched } = fakeDeps({ existing: { '555': existingSub('28.62,77.20', 28.6139, 77.209) } });
+
+  const outcome = await handleIntent(status(), deps);
+
+  expect(outcome.action).toBe('status.report');
+  expect(fetched).toEqual([{ lat: 28.6139, lng: 77.209 }]);
+  const text = sent[0]!.text;
+  expect(text).toContain('AQI 249');
+  expect(text).toContain('Poor');
+  expect(text).toContain('ORANGE');
+  expect(text).toContain('PM2.5 105');
+  expect(text).toContain('06:00 UTC');
+  expect(text).toContain('DPCC Anand Vihar');
+  expect(text).toContain('Cancel outdoor sports and assemblies.');
+  expect(text).toContain('do not replace official orders');
+});
+
+test('/status says so plainly when there is no station within range', async () => {
+  const { deps, sent } = fakeDeps({ existing: { '555': existingSub('a', 1, 2) }, pm25: 'no_station' });
+
+  const outcome = await handleIntent(status(), deps);
+
+  expect(outcome.action).toBe('status.fetch_failed');
+  expect(sent[0]!.text).toBe(TEXTS.noStation);
+});
+
+test('/status distinguishes a silent station from a dead service', async () => {
+  const stale = fakeDeps({ existing: { '555': existingSub('a', 1, 2) }, pm25: 'stale_data' });
+  expect((await handleIntent(status(), stale.deps)).action).toBe('status.fetch_failed');
+  expect(stale.sent[0]!.text).toBe(TEXTS.staleStation);
+
+  for (const reason of ['api_error', 'timeout'] as const) {
+    const down = fakeDeps({ existing: { '555': existingSub('a', 1, 2) }, pm25: reason });
+    await handleIntent(status(), down.deps);
+    expect(down.sent[0]!.text).toBe(TEXTS.serviceDown);
+  }
+});
+
+test('a subscriber row without coordinates is treated as no location', async () => {
+  const { deps, fetched } = fakeDeps({ existing: { '555': existingSub() } });
+
+  const outcome = await handleIntent(status(), deps);
+
+  expect(outcome.action).toBe('status.no_location');
+  expect(fetched).toHaveLength(0);
+});
+
+test('sharing a location also shows the current air, in the same reply', async () => {
+  const { deps, sent } = fakeDeps();
+
+  const outcome = await handleIntent({ kind: 'location', chatId: 555, lat: 28.6139, lng: 77.209 }, deps);
+
+  expect(outcome.action).toBe('location.saved');
+  expect(sent).toHaveLength(1);
+  expect(sent[0]!.text).toContain('✅ Saved');
+  expect(sent[0]!.text).toContain('AQI 249');
+});
+
+test('if OpenAQ is down we still confirm the saved location (onboarding must not fail)', async () => {
+  const { deps, sent, saved } = fakeDeps({ pm25: 'api_error' });
+
+  const outcome = await handleIntent({ kind: 'location', chatId: 555, lat: 28.6139, lng: 77.209 }, deps);
+
+  expect(outcome.action).toBe('location.saved');
+  expect(saved).toHaveLength(1);
+  expect(sent[0]!.text).toBe(TEXTS.locationSaved(locKeyFor(28.6139, 77.209)));
+});
+
+test('formatAirReport derives the tier from the shared AQI math', () => {
+  const text = formatAirReport(READING);
+
+  expect(text).toContain(`AQI 249 — Poor (${aqiToTier(249)})`);
+  expect(text).toContain(`PM2.5 ${READING.pm25}`);
+  expect(text).toContain(READING.stationName);
+});
+
+test('formatAirReport handles a RED reading', () => {
+  const text = formatAirReport({ ...READING, pm25: 180, measuredAt: '2026-10-11T18:30:00Z' });
+
+  expect(text).toContain('AQI 346');
+  expect(text).toContain('RED');
+  expect(text).toContain('18:30 UTC');
+  expect(text).toContain('All outdoor activity stopped.');
 });

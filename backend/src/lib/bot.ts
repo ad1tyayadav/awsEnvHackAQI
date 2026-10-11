@@ -7,11 +7,17 @@
 // location, so there is no language step to interrupt the one-tap onboarding.
 import { locationKeyboard, type Intent, type TgClient } from './telegram';
 import { locKeyFor, type Subscriber } from './subscribers';
+import { OpenAqError, type Pm25Reading } from './openaq';
+import { pm25ToAqi } from './aqi';
+import { aqiToTier, type Tier } from './tiers';
+import { getAdvisoryText, DISCLAIMER } from './advisory';
 
 export interface BotDeps {
   tg: TgClient;
   getSubscriber(chatId: string): Promise<Subscriber | null>;
   saveLocation(input: { chatId: string; firstName?: string; lat: number; lng: number }): Promise<void>;
+  /** Nearest recent PM2.5 reading, reusing the same OpenAQ client as the scheduler. */
+  fetchPm25(lat: number, lng: number): Promise<Pm25Reading>;
 }
 
 export interface BotOutcome {
@@ -52,7 +58,63 @@ export const TEXTS = {
 
   locationUpdated: (locKey: string) =>
     `✅ Location updated (${locKey}). I am watching your new area now.`,
+
+  noLocation: [
+    'I do not know your area yet.',
+    '',
+    'Send /start and tap the 📍 Share my location button — that is all I need.',
+  ].join('\n'),
+
+  // One clear sentence per failure, so a user is never left guessing.
+  noStation: [
+    'I could not find an air-quality station near your area yet.',
+    '',
+    'The public sensor network is thin outside big cities. You can send /start and share a different location (a nearby city works too) — I will keep trying from here either way.',
+  ].join('\n'),
+
+  staleStation: [
+    'The nearest station has not reported recently, so I cannot give you a reliable number right now.',
+    '',
+    'Please try /status again a little later.',
+  ].join('\n'),
+
+  serviceDown: [
+    'The air-quality service is not responding right now.',
+    '',
+    'Please try /status again in a few minutes.',
+  ].join('\n'),
 } as const;
+
+/** Nicely formats one reading. Pure. */
+export function formatAirReport(reading: Pm25Reading): string {
+  const { aqi, category } = pm25ToAqi(reading.pm25);
+  const tier: Tier = aqiToTier(aqi);
+  const measured = reading.measuredAt.length >= 16
+    ? `${reading.measuredAt.slice(11, 16)} UTC`
+    : reading.measuredAt;
+
+  return [
+    `🌫️ Air right now in your area`,
+    '',
+    `AQI ${aqi} — ${category} (${tier})`,
+    `PM2.5 ${reading.pm25} µg/m³, measured ${measured}`,
+    `Station: ${reading.stationName}`,
+    '',
+    'What to do:',
+    getAdvisoryText(tier),
+    '',
+    DISCLAIMER,
+  ].join('\n');
+}
+
+/** Maps a station/service failure to the sentence we send the user. */
+function fetchFailureText(err: unknown): string {
+  if (err instanceof OpenAqError) {
+    if (err.reason === 'no_station') return TEXTS.noStation;
+    if (err.reason === 'stale_data') return TEXTS.staleStation;
+  }
+  return TEXTS.serviceDown;
+}
 
 /** Sends one reply and turns the client's result into a loggable outcome. */
 async function reply(
@@ -102,7 +164,33 @@ async function handleLocation(
   const locKey = locKeyFor(lat, lng);
   const moved = Boolean(before?.locKey) && before?.locKey !== locKey;
   const text = moved ? TEXTS.locationUpdated(locKey) : TEXTS.locationSaved(locKey);
-  return reply(deps, chatId, text, moved ? 'location.updated' : 'location.saved');
+
+  // Best effort: showing the current air right away makes the one-time sign-up
+  // feel complete. If OpenAQ is unreachable we still confirm the location.
+  let reading: string | null = null;
+  try {
+    reading = formatAirReport(await deps.fetchPm25(lat, lng));
+  } catch (err) {
+    console.warn(JSON.stringify({ msg: 'openaq failed during onboarding', chatId, error: String(err) }));
+  }
+
+  return reply(deps, chatId, reading ? `${text}\n\n${reading}` : text, moved ? 'location.updated' : 'location.saved');
+}
+
+/** /status: same reading on demand, with a clear sentence if anything fails. */
+async function handleStatus(chatId: number, deps: BotDeps): Promise<BotOutcome> {
+  const sub = await deps.getSubscriber(String(chatId));
+  if (!sub || typeof sub.lat !== 'number' || typeof sub.lng !== 'number') {
+    return reply(deps, chatId, TEXTS.noLocation, 'status.no_location');
+  }
+
+  try {
+    const reading = await deps.fetchPm25(sub.lat, sub.lng);
+    return reply(deps, chatId, formatAirReport(reading), 'status.report');
+  } catch (err) {
+    console.error(JSON.stringify({ msg: 'openaq failed for /status', chatId, error: String(err) }));
+    return reply(deps, chatId, fetchFailureText(err), 'status.fetch_failed');
+  }
 }
 
 /**
@@ -116,6 +204,9 @@ export async function handleIntent(intent: Intent, deps: BotDeps): Promise<BotOu
       return handleStart(intent.chatId, deps);
     case 'location':
       return handleLocation(intent.chatId, intent.lat, intent.lng, intent.firstName, deps);
+    case 'command':
+      if (intent.command === 'status') return handleStatus(intent.chatId, deps);
+      return { action: `unhandled:command:${intent.command}`, sent: 0, blocked: false };
     case 'ignored':
       return { action: `ignored:${intent.reason}`, sent: 0, blocked: false };
     default:

@@ -22,6 +22,13 @@ function fakeDeps(opts: { existing?: Record<string, unknown>; throwOnSave?: bool
         if (opts.throwOnSave) throw new Error('dynamodb down');
         saved.push(input);
       },
+      // No network: a canned station reading, shaped like the OpenAQ client's.
+      fetchPm25: async () => ({
+        pm25: 105,
+        stationName: 'Test Station',
+        stationId: 1,
+        measuredAt: '2026-10-11T06:00:00Z',
+      }),
     },
   };
   return { deps, sent, saved };
@@ -111,13 +118,25 @@ test('/start is routed to the bot and answered', async () => {
   expect(sent[0]!.text).toContain('Share your location');
 });
 
-test('a shared location is stored for the right chat', async () => {
-  const { deps, saved } = fakeDeps();
+test('a shared location is stored for the right chat and answered', async () => {
+  const { deps, saved, sent } = fakeDeps();
 
   const res = await createWebhookHandler(deps)(update(locationUpdate));
 
   expect(res.statusCode).toBe(200);
   expect(saved).toEqual([{ chatId: '555', firstName: 'Asha', lat: 28.6139, lng: 77.209 }]);
+  expect(sent[0]!.text).toContain('✅ Saved');
+});
+
+test('/status reaches the reading flow', async () => {
+  const { deps, sent } = fakeDeps({ existing: { '555': { chatId: '555', lat: 28.6139, lng: 77.209, active: true, blocked: false, lastAlertTier: null } } });
+
+  const res = await createWebhookHandler(deps)(
+    update({ update_id: 13, message: { message_id: 4, chat: { id: 555 }, text: '/status' } })
+  );
+
+  expect(res.statusCode).toBe(200);
+  expect(sent[0]!.text).toContain('AQI 249');
 });
 
 test('an update we do not handle is acknowledged silently (no invented reply)', async () => {

@@ -8,6 +8,7 @@
 import { createTgClient, parseUpdate, type TgUpdate } from '../../lib/telegram';
 import { handleIntent, type BotDeps } from '../../lib/bot';
 import { getSubscriber, upsertCitizen } from '../../lib/subscribers';
+import { fetchNearestPM25 } from '../../lib/openaq';
 
 /** Case-insensitive header lookup; HTTP API v2 header names vary in case. */
 export function getHeader(
@@ -49,6 +50,8 @@ export function productionDeps(): WebhookDeps {
       tg: createTgClient(process.env.TELEGRAM_BOT_TOKEN ?? ''),
       getSubscriber,
       saveLocation: upsertCitizen,
+      // Same OpenAQ client the scheduler uses; key read per request.
+      fetchPm25: (lat, lng) => fetchNearestPM25(lat, lng, process.env.OPENAQ_API_KEY ?? ''),
     },
   };
 }
