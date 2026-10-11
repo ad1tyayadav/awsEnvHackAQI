@@ -29,6 +29,8 @@ function fakeDeps(opts: { existing?: Record<string, unknown>; throwOnSave?: bool
         stationId: 1,
         measuredAt: '2026-10-11T06:00:00Z',
       }),
+      setActive: async () => {},
+      markBlocked: async () => {},
     },
   };
   return { deps, sent, saved };

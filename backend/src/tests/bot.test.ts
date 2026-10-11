@@ -30,6 +30,8 @@ function fakeDeps(options: {
   const sent: Sent[] = [];
   const saved: { chatId: string; firstName?: string; lat: number; lng: number }[] = [];
   const fetched: { lat: number; lng: number }[] = [];
+  const activeCalls: { chatId: string; active: boolean }[] = [];
+  const blockedCalls: string[] = [];
   const subs = new Map<string, Subscriber>(Object.entries(options.existing ?? {}));
 
   const deps: BotDeps = {
@@ -56,6 +58,12 @@ function fakeDeps(options: {
       if (options.pm25 === 'timeout') throw new OpenAqError('timeout', 'took too long');
       return options.pm25 ?? READING;
     },
+    setActive: async (chatId, active) => {
+      activeCalls.push({ chatId, active });
+    },
+    markBlocked: async (chatId) => {
+      blockedCalls.push(chatId);
+    },
     getSubscriber: async (chatId) => subs.get(chatId) ?? null,
     saveLocation: async (input) => {
       saved.push(input);
@@ -74,7 +82,7 @@ function fakeDeps(options: {
     },
   };
 
-  return { deps, sent, saved, fetched, subs };
+  return { deps, sent, saved, fetched, activeCalls, blockedCalls, subs };
 }
 
 const existingSub = (locKey?: string, lat?: number, lng?: number): Subscriber => ({
@@ -204,16 +212,22 @@ test('if saving the location fails we must not promise it was saved', async () =
   expect(sent).toHaveLength(0);
 });
 
-test('ignored and not-yet-handled intents send nothing and say why', async () => {
+test('an unparseable update sends nothing and reports why', async () => {
   const { deps, sent } = fakeDeps();
 
   const ignored = await handleIntent({ kind: 'ignored', reason: 'no message' }, deps);
+
   expect(ignored).toEqual({ action: 'ignored:no message', sent: 0, blocked: false });
+  expect(sent).toHaveLength(0);
+});
 
-  const text: Intent = { kind: 'text', chatId: 555, text: 'hello?' };
-  const unhandled = await handleIntent(text, deps);
-  expect(unhandled).toEqual({ action: 'unhandled:text', sent: 0, blocked: false });
+test('a not-yet-implemented intent type stays silent rather than guessing', async () => {
+  const { deps, sent } = fakeDeps();
+  const intent = { kind: 'language', chatId: 555, lang: 'en' } as unknown as Intent;
 
+  const outcome = await handleIntent(intent, deps);
+
+  expect(outcome.action).toBe('unhandled:language');
   expect(sent).toHaveLength(0);
 });
 
@@ -308,6 +322,79 @@ test('formatAirReport derives the tier from the shared AQI math', () => {
   expect(text).toContain(`AQI 249 — Poor (${aqiToTier(249)})`);
   expect(text).toContain(`PM2.5 ${READING.pm25}`);
   expect(text).toContain(READING.stationName);
+});
+
+// ---------------------------------------------------------------------------
+// task 9R.6: /stop, help fallback and the blocked-bot path
+// ---------------------------------------------------------------------------
+
+test('/stop switches the alerts off for a subscriber who is set up', async () => {
+  const { deps, sent, activeCalls } = fakeDeps({ existing: { '555': existingSub('a', 1, 2) } });
+
+  const outcome = await handleIntent({ kind: 'command', chatId: 555, command: 'stop', args: [] }, deps);
+
+  expect(outcome.action).toBe('stop.done');
+  expect(activeCalls).toEqual([{ chatId: '555', active: false }]);
+  expect(sent[0]!.text).toBe(TEXTS.stopped);
+});
+
+test('/stop on a chat that never signed up says so instead of faking success', async () => {
+  const { deps, sent, activeCalls } = fakeDeps();
+
+  const outcome = await handleIntent({ kind: 'command', chatId: 555, command: 'stop', args: [] }, deps);
+
+  expect(outcome.action).toBe('stop.not_set_up');
+  expect(activeCalls).toHaveLength(0);
+  expect(sent[0]!.text).toBe(TEXTS.notSetUp);
+});
+
+test('sharing a location again after /stop switches the alerts back on', async () => {
+  const stopped = existingSub();
+  stopped.active = false;
+  const { deps, subs } = fakeDeps({ existing: { '555': stopped } });
+
+  await handleIntent({ kind: 'location', chatId: 555, lat: 1, lng: 2 }, deps);
+
+  // upsertCitizen sets active = true, so re-onboarding revives a stopped chat
+  expect(subs.get('555')?.active).toBe(true);
+});
+
+test('/help explains the three things the bot can do', async () => {
+  const { deps, sent } = fakeDeps();
+
+  const outcome = await handleIntent({ kind: 'command', chatId: 555, command: 'help', args: [] }, deps);
+
+  expect(outcome.action).toBe('help');
+  expect(sent[0]!.text).toBe(TEXTS.help);
+  expect(sent[0]!.text).toContain('/status');
+  expect(sent[0]!.text).toContain('/stop');
+});
+
+test('an unknown command and plain chat get the menu, never silence', async () => {
+  const { deps, sent } = fakeDeps();
+
+  const unknown = await handleIntent({ kind: 'command', chatId: 555, command: 'unknown', args: [] }, deps);
+  const chat = await handleIntent({ kind: 'text', chatId: 555, text: 'is it safe today?' }, deps);
+
+  expect(unknown.action).toBe('help.unknown_command');
+  expect(chat.action).toBe('help.text');
+  expect(sent.map((s) => s.text)).toEqual([TEXTS.help, TEXTS.help]);
+});
+
+test('a 403 from Telegram marks the subscriber blocked', async () => {
+  const { deps, blockedCalls } = fakeDeps({ sendFails: 'blocked' });
+
+  await handleIntent({ kind: 'start', chatId: 555 }, deps);
+
+  expect(blockedCalls).toEqual(['555']);
+});
+
+test('a non-blocking send failure does not mark anyone blocked', async () => {
+  const { deps, blockedCalls } = fakeDeps({ sendFails: 'network' });
+
+  await handleIntent({ kind: 'start', chatId: 555 }, deps);
+
+  expect(blockedCalls).toHaveLength(0);
 });
 
 test('formatAirReport handles a RED reading', () => {

@@ -18,6 +18,10 @@ export interface BotDeps {
   saveLocation(input: { chatId: string; firstName?: string; lat: number; lng: number }): Promise<void>;
   /** Nearest recent PM2.5 reading, reusing the same OpenAQ client as the scheduler. */
   fetchPm25(lat: number, lng: number): Promise<Pm25Reading>;
+  /** /stop sets active = false; /start (via a location share) sets it back. */
+  setActive(chatId: string, active: boolean): Promise<void>;
+  /** Telegram said the user blocked the bot: remember it so we stop sending. */
+  markBlocked(chatId: string): Promise<void>;
 }
 
 export interface BotOutcome {
@@ -83,6 +87,26 @@ export const TEXTS = {
     '',
     'Please try /status again in a few minutes.',
   ].join('\n'),
+
+  stopped: [
+    '🔕 Alerts stopped. I will stay quiet.',
+    '',
+    'Send /start whenever you want them back.',
+  ].join('\n'),
+
+  help: [
+    'I watch the air in your area and message you when it turns bad.',
+    '',
+    '/status — the reading right now',
+    '/start — sign up or move to another area',
+    '/stop — stop the alerts',
+  ].join('\n'),
+
+  notSetUp: [
+    'You are not set up yet, so there is nothing to stop.',
+    '',
+    'Send /start and tap 📍 Share my location to begin.',
+  ].join('\n'),
 } as const;
 
 /** Nicely formats one reading. Pure. */
@@ -127,6 +151,15 @@ async function reply(
   const res = await deps.tg.sendMessage(chatId, text, replyMarkup ? { replyMarkup } : {});
   if (!res.ok) {
     console.error(JSON.stringify({ msg: 'telegram send failed', chatId, action, error: res.error }));
+    if (res.blocked) {
+      // A 403 means they blocked the bot: remember it so the scheduler stops
+      // wasting sends. A failure here must not mask the send failure.
+      try {
+        await deps.markBlocked(String(chatId));
+      } catch (err) {
+        console.error(JSON.stringify({ msg: 'could not mark subscriber blocked', chatId, error: String(err) }));
+      }
+    }
     return { action: `${action}.failed`, sent: res.sent, blocked: res.blocked };
   }
   return { action, sent: res.sent, blocked: false };
@@ -177,6 +210,18 @@ async function handleLocation(
   return reply(deps, chatId, reading ? `${text}\n\n${reading}` : text, moved ? 'location.updated' : 'location.saved');
 }
 
+/**
+ * /stop: stop the automatic alerts. Only meaningful for someone who is set up;
+ * telling a stranger "stopped" would be a lie, so they get the sign-up hint.
+ */
+async function handleStop(chatId: number, deps: BotDeps): Promise<BotOutcome> {
+  const sub = await deps.getSubscriber(String(chatId));
+  if (!sub) return reply(deps, chatId, TEXTS.notSetUp, 'stop.not_set_up');
+
+  await deps.setActive(String(chatId), false);
+  return reply(deps, chatId, TEXTS.stopped, 'stop.done');
+}
+
 /** /status: same reading on demand, with a clear sentence if anything fails. */
 async function handleStatus(chatId: number, deps: BotDeps): Promise<BotOutcome> {
   const sub = await deps.getSubscriber(String(chatId));
@@ -206,7 +251,14 @@ export async function handleIntent(intent: Intent, deps: BotDeps): Promise<BotOu
       return handleLocation(intent.chatId, intent.lat, intent.lng, intent.firstName, deps);
     case 'command':
       if (intent.command === 'status') return handleStatus(intent.chatId, deps);
-      return { action: `unhandled:command:${intent.command}`, sent: 0, blocked: false };
+      if (intent.command === 'stop') return handleStop(intent.chatId, deps);
+      if (intent.command === 'help') return reply(deps, intent.chatId, TEXTS.help, 'help');
+      // An unknown command gets the same menu as plain chat: never silence.
+      return reply(deps, intent.chatId, TEXTS.help, 'help.unknown_command');
+    case 'text':
+      // Free text cannot be understood yet (no AI layer). Answer with the menu
+      // rather than leaving the user staring at nothing.
+      return reply(deps, intent.chatId, TEXTS.help, 'help.text');
     case 'ignored':
       return { action: `ignored:${intent.reason}`, sent: 0, blocked: false };
     default:
