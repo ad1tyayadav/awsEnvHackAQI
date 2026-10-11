@@ -2,6 +2,7 @@ node_modules/
 .aws-sam/
 .env*
 !.env.example
+.localstore/
 dist/
 out/
 __tests__/

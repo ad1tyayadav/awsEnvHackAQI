@@ -171,22 +171,47 @@ Mumbai, Bengaluru).
 
 ---
 
-## 5. Local development (no deploy)
+## 5. Test on your phone WITHOUT deploying
 
-There is no local webhook: Telegram only calls HTTPS. Two options:
+Telegram cannot reach `localhost`, so a webhook needs a public URL. You do not
+need one for a live test: instead of a webhook, the runner below asks Telegram
+for updates itself ("long polling") and feeds them through the **same** parser,
+conversation flows, Bot API client and OpenAQ code the deployed Lambdas use.
+Only the storage changes: DynamoDB becomes a JSON file at
+`backend/.localstore/subscribers.json` (gitignored).
 
 ```bash
-# Option A - stop Telegram from calling the deployed webhook, then poll yourself
-curl "https://api.telegram.org/bot$TOKEN/deleteWebhook"
+cd backend
+npx tsx scripts/tg-local.ts            # then chat with the bot on your phone
 ```
+
+It clears the webhook first (the API docs say polling and a webhook are mutually
+exclusive), prints the bot's `@username`, and logs one line per update it handles.
+Now send `/start` and tap **📍 Share my location** — you get real replies, with
+real OpenAQ data. Then try `/status`, `/stop`, and any random text.
+
+### See the automatic alert today, not in 30 minutes
+
+In a second terminal, run exactly what the EventBridge schedule runs:
 
 ```bash
-# Option B - tunnel a local server and point setWebhook at the tunnel URL
-# (ngrok, cloudflared, ...). Ports Telegram accepts: 443, 80, 88, 8443.
+npx tsx scripts/tg-local.ts --fanout   # the alert job, once, for real
+npx tsx scripts/tg-local.ts --store    # what got saved (locKey, active, tier)
+npx tsx scripts/tg-local.ts --reset    # forget lastAlertTier so --fanout alerts again
 ```
 
-Either way the bot's own logic is fully unit-tested (`npm test` — no AWS, no
-network, no Telegram), so the fast loop is the test suite, not the phone.
+The summary line tells you what happened. `alertsSent: 0` with subscribers > 0
+means the air is not ORANGE/RED right now, or you were already told about the
+current tier — that is the de-duplication working, and `--reset` is how you see
+it fire again on demand.
+
+The bot's own logic is also fully unit-tested (`npm test` — no AWS, no network,
+no Telegram), so day-to-day the fast loop is the test suite, not the phone.
+
+### Deploying later is still worth it
+
+Polling is for testing. The deployed version is what gives you the automatic
+30-minute checks with your laptop closed, so keep §2–§4 for that day.
 
 ### See the whole conversation without deploying anything
 

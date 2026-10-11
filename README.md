@@ -100,9 +100,23 @@ docs/TELEGRAM_BOT.md    deploy + setWebhook runbook and test checklist
 ```bash
 cd backend
 npm install
-npm test                       # 141 tests, no AWS and no network needed
+npm test                       # 124 tests, no AWS and no network needed
 npx tsx scripts/preview-bot.ts # read the exact chat the bot produces
 ```
+
+### Try the real bot from your phone, with no deploy
+
+Put your BotFather token in `.env` (see `.env.example`), then:
+
+```bash
+npx tsx scripts/tg-local.ts            # long polling: /start and go
+npx tsx scripts/tg-local.ts --fanout   # run the alert job once, for real
+```
+
+Telegram cannot call `localhost`, so this asks Telegram for updates instead of
+receiving a webhook, and drives the same parser, flows, OpenAQ and Bot API code
+the Lambdas use — only DynamoDB is swapped for a local JSON file. Details in
+`docs/TELEGRAM_BOT.md` §5.
 
 Deploy and connect Telegram: see **`docs/TELEGRAM_BOT.md`**. Short version — copy
 `.env.example` to `.env` and fill in the three values first (`OPENAQ_API_KEY`,
