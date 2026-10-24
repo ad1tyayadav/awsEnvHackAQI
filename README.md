@@ -357,3 +357,6 @@ can be capped with `aws logs put-retention-policy`. Tear down with
 - **Voice alerts (Amazon Polly)** — for low-literacy users.
 - **Heatwave playbook (Track 02)** — the same scheduler, a temperature sensor
   instead of an air-quality one.
+
+  ## Cretificate
+  https://www.wemakedevs.org/certificates/N5RTBZMXFP/image.png?v=2026-10-23T20%3A29%3A24.701914Z&w=1600
